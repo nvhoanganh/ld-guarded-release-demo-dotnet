@@ -1,0 +1,49 @@
+# Build output
+bin/
+obj/
+out/
+publish/
+*.dll
+*.exe
+*.pdb
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Rider / Visual Studio
+.idea/
+*.swp
+
+# VS Code
+.vscode/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+coverage*.json
+coverage*.xml
+coverage*.info
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Local secrets / config overrides
+appsettings.json
+appsettings.Local.json
+appsettings.Development.json
+*.env
+.env.*
+secrets.json

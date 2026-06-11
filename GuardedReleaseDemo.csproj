@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <RootNamespace>GuardedReleaseDemo</RootNamespace>
+        <AssemblyName>GuardedReleaseDemo</AssemblyName>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="LaunchDarkly.ServerSdk" Version="8.*" />
+        <PackageReference Include="LaunchDarkly.Observability" Version="1.*" />
+        <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.*" />
+    </ItemGroup>
+
+</Project>
