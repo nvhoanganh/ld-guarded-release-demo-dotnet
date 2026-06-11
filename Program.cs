@@ -1,8 +1,6 @@
 using System.Diagnostics;
-using LaunchDarkly.Observability;
 using LaunchDarkly.Sdk;
 using LaunchDarkly.Sdk.Server;
-using LaunchDarkly.Sdk.Server.Integrations;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,18 +13,9 @@ if (sdkKey == "YOUR_SDK_KEY_HERE")
     Console.Error.WriteLine("[WARN] LaunchDarkly SDK key is still the placeholder. Replace it in appsettings.json before running.");
 }
 
-// Build the LdClient with the Observability plugin attached.
-// The plugin registers OTel instrumentation into builder.Services, so it must
-// be constructed BEFORE builder.Build().
-var ldConfig = Configuration.Builder(sdkKey)
-    .Plugins(new PluginConfigurationBuilder()
-        .Add(ObservabilityPlugin.Builder(builder.Services)
-            .WithServiceName("guarded-release-demo")
-            .WithServiceVersion("1.0.0")
-            .Build()))
-    .Build();
-
-var ldClient = new LdClient(ldConfig);
+// Plain LaunchDarkly server SDK — no Observability plugin, no OpenTelemetry.
+// All metric data for Guarded Releases is sent through LdClient.Track().
+var ldClient = new LdClient(Configuration.Builder(sdkKey).Build());
 builder.Services.AddSingleton(ldClient);
 
 var app = builder.Build();
@@ -38,7 +27,7 @@ app.Lifetime.ApplicationStopping.Register(() =>
 });
 
 app.MapGet("/", () =>
-    "Guarded Release demo running. POST /api/checkout with JSON body { \"userId\": \"u-1\", \"cartTotal\": 99.99 }");
+    "Guarded Release demo (SDK-only) running. POST /api/checkout with JSON body { \"userId\": \"u-1\", \"cartTotal\": 99.99 }");
 
 app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req, LdClient ld, ILogger<Program> log) =>
 {
@@ -59,6 +48,7 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     var useNewFlow = ld.BoolVariation("new-checkout-flow", context, false);
 
     var sw = Stopwatch.StartNew();
+    IResult result;
 
     if (useNewFlow)
     {
@@ -69,31 +59,41 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
         if (Random.Shared.NextDouble() < 0.20)
         {
             log.LogWarning("New checkout failed for {UserId} after {Ms}ms", req.UserId, sw.ElapsedMilliseconds);
-            return Results.Json(
+            result = Results.Json(
                 new { engine = "v2", error = "payment processor timeout" },
                 statusCode: 500);
         }
-
-        return Results.Ok(new
+        else
         {
-            engine = "v2",
+            result = Results.Ok(new
+            {
+                engine = "v2",
+                orderId = Guid.NewGuid().ToString("N"),
+                processingMs = sw.ElapsedMilliseconds,
+                cartTotal = req.CartTotal
+            });
+        }
+    }
+    else
+    {
+        // Old checkout: fast, stable.
+        await Task.Delay(Random.Shared.Next(50, 100));
+        sw.Stop();
+
+        result = Results.Ok(new
+        {
+            engine = "v1",
             orderId = Guid.NewGuid().ToString("N"),
             processingMs = sw.ElapsedMilliseconds,
             cartTotal = req.CartTotal
         });
     }
 
-    // Old checkout: fast, stable.
-    await Task.Delay(Random.Shared.Next(50, 100));
-    sw.Stop();
+    // Custom LD metric: numeric checkout latency, sent via the standard SDK Track API.
+    // LaunchDarkly's Guarded Release consumes this directly (lower is better).
+    ld.Track("checkout-latency", context, LdValue.Null, sw.ElapsedMilliseconds);
 
-    return Results.Ok(new
-    {
-        engine = "v1",
-        orderId = Guid.NewGuid().ToString("N"),
-        processingMs = sw.ElapsedMilliseconds,
-        cartTotal = req.CartTotal
-    });
+    return result;
 });
 
 app.Run();

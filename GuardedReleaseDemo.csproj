@@ -10,7 +10,6 @@
 
     <ItemGroup>
         <PackageReference Include="LaunchDarkly.ServerSdk" Version="8.*" />
-        <PackageReference Include="LaunchDarkly.Observability" Version="1.*" />
     </ItemGroup>
 
 </Project>

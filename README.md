@@ -4,17 +4,21 @@ A minimal ASP.NET Core Web API that demonstrates LaunchDarkly's **Guarded Releas
 a boolean flag gates a "new checkout flow" that injects latency + errors, a k6 load test drives
 traffic, and LaunchDarkly automatically rolls the flag back when metrics regress.
 
-Guarded Release watches an **automatic metric** —
-`http.latency;route=/api/checkout` — which LaunchDarkly's Observability module
-auto-generates from the OpenTelemetry trace data emitted by ASP.NET Core. No custom
-event tracking required on the app side.
+**This branch (`no-otel-use-sdk-metric`) shows the pure-SDK variant** — no
+`LaunchDarkly.Observability` package, no OpenTelemetry, no auto-generated metrics. The
+Guarded Release is driven by a custom numeric metric (`checkout-latency`) emitted via the
+standard `LdClient.Track()` API. Use this branch if you don't want LaunchDarkly's
+Observability module in your dependency tree.
+
+> See the `main` branch for the OpenTelemetry/Observability-driven variant where the
+> metric is auto-generated from trace data and no `Track()` calls are needed.
 
 ## Prerequisites
 
 - **.NET SDK 10.0+** — <https://dotnet.microsoft.com/download>
 - **k6** — `brew install k6` (macOS) or see <https://k6.io/docs/get-started/installation/>
-- **A LaunchDarkly account** with an SDK key (server-side) and the Observability feature enabled
-  (the auto-generated `http.latency` metric requires this)
+- **A LaunchDarkly account** with a server-side SDK key. The Observability feature is
+  **not** required for this branch.
 
 ## 1. Configure LaunchDarkly
 
@@ -28,21 +32,20 @@ In your LaunchDarkly project, set up the following manually:
 | Kind | Boolean |
 | Default rule | Serve `false` |
 
-### Automatic metric (Observability)
-
-After you run the app for ~30s and it sends trace data, an event key
-`http.latency;route=/api/checkout` will appear under **Telemetry → Observability metrics**
-(source: OpenTelemetry). Create a second metric:
+### Custom metric
 
 | Setting | Value |
 |---|---|
 | Define metric using | LaunchDarkly hosted |
 | Event kind | Custom |
-| Event key | `http.latency;route=/api/checkout` |
+| Event key | `checkout-latency` |
 | Metric definition | Average per request, then Average, **lower is better** |
 | Unit | `ms` |
 | Units without events | Excluded |
-| Metric name | `http-latency-checkout` |
+| Metric name | `checkout-latency` |
+
+This metric is fed by `LdClient.Track("checkout-latency", context, null, elapsedMs)`
+inside the `/api/checkout` handler.
 
 ### Guarded rollout
 
@@ -50,7 +53,7 @@ On the `new-checkout-flow` flag → Targeting → Default rule → Serve **Guard
 
 - Target variation: **true** (the bad variation)
 - Target by: **request** (matches the metric's per-request unit)
-- Metrics to monitor: **`http-latency-checkout`** with ✓ Auto rollback
+- Metrics to monitor: **`checkout-latency`** with ✓ Auto rollback
 - Rollout stages (recommended for live demos):
   `5% → 10% → 25% → 50% → 100%`, **5 minutes each** (20 min total)
 
@@ -121,25 +124,22 @@ While k6 runs:
 
 ## How it works
 
-- `Program.cs` constructs an `LdClient` with the `LaunchDarkly.Observability` plugin attached.
-  The plugin wires up OpenTelemetry tracing + metrics and exports them to LaunchDarkly's
-  hosted OTLP collector (`https://otel.observability.app.launchdarkly.com:4318`) — no
-  manual exporter setup required.
+- `Program.cs` constructs a plain `LdClient` from `LaunchDarkly.ServerSdk` — no plugins,
+  no OpenTelemetry instrumentation, no extra packages.
 - `POST /api/checkout` evaluates `new-checkout-flow` with a multi-`Context` (a `user`
   kind keyed off the request's `userId`, plus a `request` kind keyed off the ASP.NET Core
   `TraceIdentifier`). It simulates fast/stable behaviour when `false` and slow/flaky
   behaviour when `true`.
-- ASP.NET Core auto-instrumentation creates a server span for every `/api/checkout` request.
-  LaunchDarkly's Observability module ingests those spans and surfaces a synthetic
-  `http.latency;route=/api/checkout` event you can build a metric on top of — that's the
-  metric driving the Guarded Release.
+- After each request the handler measures elapsed time and calls
+  `ld.Track("checkout-latency", context, LdValue.Null, sw.ElapsedMilliseconds)`. That
+  Track event is what LaunchDarkly's Guarded Release consumes to detect regression.
 
 ## Project layout
 
 ```
 .
-├── GuardedReleaseDemo.csproj   # .NET 10 web project, refs LaunchDarkly.ServerSdk + LaunchDarkly.Observability
-├── Program.cs                  # Minimal API: ObservabilityPlugin setup + POST /api/checkout
+├── GuardedReleaseDemo.csproj   # .NET 10 web project, refs LaunchDarkly.ServerSdk only
+├── Program.cs                  # Minimal API: LdClient + POST /api/checkout with Track()
 ├── appsettings.example.json    # Template — copy to appsettings.json and add your SDK key
 ├── appsettings.json            # Local config (git-ignored; holds your real SDK key)
 ├── k6/
