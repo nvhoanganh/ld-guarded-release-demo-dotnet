@@ -59,58 +59,41 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     var useNewFlow = ld.BoolVariation("new-checkout-flow", context, false);
 
     var sw = Stopwatch.StartNew();
-    IResult result;
 
-    try
+    if (useNewFlow)
     {
-        if (useNewFlow)
-        {
-            // New checkout: slower, occasionally fails.
-            await Task.Delay(Random.Shared.Next(300, 800));
-            if (Random.Shared.NextDouble() < 0.20)
-            {
-                sw.Stop();
-                log.LogWarning("New checkout failed for {UserId} after {Ms}ms", req.UserId, sw.ElapsedMilliseconds);
-                result = Results.Json(
-                    new { engine = "v2", error = "payment processor timeout" },
-                    statusCode: 500);
-            }
-            else
-            {
-                sw.Stop();
-                result = Results.Ok(new
-                {
-                    engine = "v2",
-                    orderId = Guid.NewGuid().ToString("N"),
-                    processingMs = sw.ElapsedMilliseconds,
-                    cartTotal = req.CartTotal
-                });
-            }
-        }
-        else
-        {
-            // Old checkout: fast, stable.
-            await Task.Delay(Random.Shared.Next(50, 100));
-            sw.Stop();
-            result = Results.Ok(new
-            {
-                engine = "v1",
-                orderId = Guid.NewGuid().ToString("N"),
-                processingMs = sw.ElapsedMilliseconds,
-                cartTotal = req.CartTotal
-            });
-        }
-    }
-    finally
-    {
-        if (sw.IsRunning) sw.Stop();
+        // New checkout: slower, occasionally fails.
+        await Task.Delay(Random.Shared.Next(300, 800));
+        sw.Stop();
 
-        // Custom LD metric: numeric checkout latency. LD's Guarded Release can use
-        // this directly (lower is better).
-        ld.Track("checkout-latency", context, LdValue.Null, sw.ElapsedMilliseconds);
+        if (Random.Shared.NextDouble() < 0.20)
+        {
+            log.LogWarning("New checkout failed for {UserId} after {Ms}ms", req.UserId, sw.ElapsedMilliseconds);
+            return Results.Json(
+                new { engine = "v2", error = "payment processor timeout" },
+                statusCode: 500);
+        }
+
+        return Results.Ok(new
+        {
+            engine = "v2",
+            orderId = Guid.NewGuid().ToString("N"),
+            processingMs = sw.ElapsedMilliseconds,
+            cartTotal = req.CartTotal
+        });
     }
 
-    return result;
+    // Old checkout: fast, stable.
+    await Task.Delay(Random.Shared.Next(50, 100));
+    sw.Stop();
+
+    return Results.Ok(new
+    {
+        engine = "v1",
+        orderId = Guid.NewGuid().ToString("N"),
+        processingMs = sw.ElapsedMilliseconds,
+        cartTotal = req.CartTotal
+    });
 });
 
 app.Run();
