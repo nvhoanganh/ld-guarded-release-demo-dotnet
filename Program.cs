@@ -3,8 +3,6 @@ using LaunchDarkly.Observability;
 using LaunchDarkly.Sdk;
 using LaunchDarkly.Sdk.Server;
 using LaunchDarkly.Sdk.Server.Integrations;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,9 +23,6 @@ var ldConfig = Configuration.Builder(sdkKey)
         .Add(ObservabilityPlugin.Builder(builder.Services)
             .WithServiceName("guarded-release-demo")
             .WithServiceVersion("1.0.0")
-            // Mirror every metric to the console so we can verify what's being emitted.
-            .WithExtendedMeterConfiguration(m => m.AddConsoleExporter())
-            .WithExtendedTracingConfig(t => t.AddConsoleExporter())
             .Build()))
     .Build();
 
@@ -45,12 +40,22 @@ app.Lifetime.ApplicationStopping.Register(() =>
 app.MapGet("/", () =>
     "Guarded Release demo running. POST /api/checkout with JSON body { \"userId\": \"u-1\", \"cartTotal\": 99.99 }");
 
-app.MapPost("/api/checkout", async (CheckoutRequest req, LdClient ld, ILogger<Program> log) =>
+app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req, LdClient ld, ILogger<Program> log) =>
 {
     if (string.IsNullOrWhiteSpace(req.UserId))
         return Results.BadRequest(new { error = "userId is required" });
 
-    var context = Context.Builder(req.UserId).Kind("user").Build();
+    var userContext = Context.Builder(req.UserId).Kind("user").Build();
+    var requestContext = Context.Builder(httpContext.TraceIdentifier)
+        .Kind("request")
+        .Set("method", httpContext.Request.Method)
+        .Set("path", httpContext.Request.Path.Value)
+        .Build();
+    var context = Context.MultiBuilder()
+        .Add(userContext)
+        .Add(requestContext)
+        .Build();
+
     var useNewFlow = ld.BoolVariation("new-checkout-flow", context, false);
 
     var sw = Stopwatch.StartNew();
