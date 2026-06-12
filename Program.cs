@@ -48,8 +48,8 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     var userContext = Context.Builder(req.UserId).Kind("user").Build();
     var requestContext = Context.Builder(httpContext.TraceIdentifier)
         .Kind("request")
-        .Set("method", httpContext.Request.Method)
-        .Set("path", httpContext.Request.Path.Value)
+        .Set("method", httpContext.Request.Method) // (optional) this is used if you want to target a GET on this attribute
+        .Set("path", httpContext.Request.Path.Value) // (optional) this is used if you want to target a GET on this attribute
         .Build();
     var context = Context.MultiBuilder()
         .Add(userContext)
