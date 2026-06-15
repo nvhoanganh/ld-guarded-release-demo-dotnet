@@ -10,7 +10,12 @@
 
     <ItemGroup>
         <PackageReference Include="LaunchDarkly.ServerSdk" Version="8.*" />
-        <PackageReference Include="LaunchDarkly.Observability" Version="1.*" />
+        <PackageReference Include="LaunchDarkly.ServerSdk.Telemetry" Version="1.*" />
+        <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.11.*" />
+        <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.*" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.*" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.11.*" />
+        <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.11.*" />
     </ItemGroup>
 
 </Project>
