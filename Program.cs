@@ -22,16 +22,11 @@ if (sdkKey == "YOUR_SDK_KEY_HERE")
 const string ServiceName = "guarded-release-demo";
 const string ServiceVersion = "1.0.0";
 
-// Exporting straight to LaunchDarkly's hosted OTLP collector — no self-hosted
-// collector in the path. Swap this for a local collector URL (e.g.
-// http://otel-collector:4318) if you need any of:
-//   - restricted egress (only the collector talks to the internet)
-//   - central sampling / redaction / batching before data leaves your network
-//   - fan-out to multiple backends (LD + Datadog/Honeycomb/etc.)
-//   - aggregating non-SDK sources (infra metrics, logs, other languages)
-// In that case, move the LD endpoint + SDK-key header into the collector's
-// exporters: block instead of configuring them here.
-const string OtlpEndpoint = "https://otel.observability.app.launchdarkly.com:4318";
+// Exporting to a local OpenTelemetry Collector sidecar that fans out to
+// LaunchDarkly + New Relic. The collector (see otel-collector-config.yaml)
+// adds the `launchdarkly.project_id` resource attribute and forwards each
+// signal to both backends, so this app stays backend-agnostic.
+const string OtlpEndpoint = "http://localhost:4318";
 
 void ConfigureOtlp(OtlpExporterOptions opts, string signalPath)
 {
@@ -39,13 +34,8 @@ void ConfigureOtlp(OtlpExporterOptions opts, string signalPath)
     opts.Protocol = OtlpExportProtocol.HttpProtobuf;
 }
 
-// LD's collector identifies the project from the `launchdarkly.project_id`
-// resource attribute (set to the SDK key) — no auth header.
-// https://launchdarkly.com/docs/sdk/features/opentelemetry-server-side#setting-resource-attributes
 builder.Services.AddOpenTelemetry()
-    .ConfigureResource(r => r
-        .AddService(serviceName: ServiceName, serviceVersion: ServiceVersion)
-        .AddAttributes(new[] { new KeyValuePair<string, object>("launchdarkly.project_id", sdkKey) }))
+    .ConfigureResource(r => r.AddService(serviceName: ServiceName, serviceVersion: ServiceVersion))
     .WithTracing(t => t
         .AddSource(TracingHook.ActivitySourceName)
         .AddAspNetCoreInstrumentation()
@@ -62,8 +52,7 @@ builder.Logging.AddOpenTelemetry(o =>
     o.IncludeFormattedMessage = true;
     o.IncludeScopes = true;
     o.SetResourceBuilder(ResourceBuilder.CreateDefault()
-        .AddService(serviceName: ServiceName, serviceVersion: ServiceVersion)
-        .AddAttributes(new[] { new KeyValuePair<string, object>("launchdarkly.project_id", sdkKey) }));
+        .AddService(serviceName: ServiceName, serviceVersion: ServiceVersion));
     o.AddOtlpExporter(e => ConfigureOtlp(e, "logs"));
 });
 

@@ -47,3 +47,7 @@ appsettings.Development.json
 *.env
 .env.*
 secrets.json
+
+# OTel Collector binary downloads
+otelcol-contrib_*.tar.gz
+otelcol-contrib
