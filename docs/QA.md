@@ -149,6 +149,27 @@ block** that a reviewer edits at the approval gate:
 The default is `auto`. **For medium/high-risk changes we recommend defaulting to
 `hold`**, so nothing releases until a human explicitly arms it.
 
+### Q: We run a monorepo — many services in one repository, deployed independently. Does this work?
+
+**Not cleanly today — this is a known gap.** Beacon's service registry maps each
+service to a **repository** (`repo:`), and it discovers release manifests from a
+**single `.release-flags/` directory at the repo root** — it does not scope
+discovery by subfolder. In a large monorepo with independently-deployed
+services, that means:
+
+- all services in the repo share **one** `.release-flags/` directory,
+- a deploy of service A runs discovery over the **whole** directory and can pick
+  up manifests intended for service B,
+- services are differentiated only by `side`/`scope` and fullstack coordination —
+  **not by path**, so a subfolder deploy cannot say "only my package's flags."
+
+The prototype effectively assumes **one repository per deployable service**. If
+you run a monorepo with independent per-subfolder deploys, this needs custom
+work — a per-service manifest convention (e.g. `.release-flags/<service>/`) and a
+discovery change, or one manifest directory per package. Neither exists in the
+prototype. Raise your repository topology with us early; a single-service repo
+(or a monorepo deployed as one unit) works today, independent sub-deploys do not.
+
 ---
 
 ## 4. Reliability & Operations
