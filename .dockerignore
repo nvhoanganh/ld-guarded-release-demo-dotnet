@@ -1,0 +1,11 @@
+bin/
+obj/
+.git/
+.vs/
+appsettings.json
+devops/
+docs/
+factory/
+k6/
+**/*.tfstate*
+**/.terraform/

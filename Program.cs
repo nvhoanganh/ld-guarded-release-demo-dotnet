@@ -40,6 +40,17 @@ app.Lifetime.ApplicationStopping.Register(() =>
 app.MapGet("/", () =>
     "Guarded Release demo running. POST /api/checkout with JSON body { \"userId\": \"u-1\", \"cartTotal\": 99.99 }");
 
+// Deploy-status endpoint. AutoFactory's Beacon reads the currently-deployed
+// commit SHA from here (services.yaml -> statusUrl, statusShaField: "version").
+// Railway injects RAILWAY_GIT_COMMIT_SHA at runtime; fall back for local runs.
+app.MapGet("/api/status", () =>
+{
+    var sha = Environment.GetEnvironmentVariable("RAILWAY_GIT_COMMIT_SHA")
+              ?? Environment.GetEnvironmentVariable("GIT_COMMIT_SHA")
+              ?? "unknown";
+    return Results.Ok(new { status = "ok", version = sha });
+});
+
 app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req, LdClient ld, ILogger<Program> log) =>
 {
     if (string.IsNullOrWhiteSpace(req.UserId))

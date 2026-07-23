@@ -1,0 +1,53 @@
+# Render Blueprint — deploys Beacon (Phase 2 release orchestrator) as a web service.
+#
+# Use: in Render → New → Blueprint → point at this repo. Render reads this file,
+# builds ./factory/Dockerfile, and provisions the service + persistent disk.
+# Fill the `sync: false` secrets in the Render dashboard after the first deploy.
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: auto-factory-beacon
+    runtime: docker
+    dockerfilePath: ./factory/Dockerfile
+    dockerContext: ./factory
+    plan: starter                 # bump if you need more memory/CPU
+    region: oregon                # change to your closest region
+    healthCheckPath: /health      # Beacon returns { ok: true }
+    autoDeploy: false             # deploy on demand; flip to true to deploy on push
+
+    envVars:
+      # Render sets PORT automatically and Beacon binds it — do not hardcode it.
+
+      # --- required secrets (set in the Render dashboard: sync:false) ---
+      - key: GITHUB_TOKEN         # fine-grained, READ-ONLY Contents on the app repo(s)
+        sync: false
+      - key: LD_API_KEY           # api-...  scoped to the APP project
+        sync: false
+      - key: LD_PROJECT_KEY       # the app/data-plane project key
+        sync: false
+
+      # --- webhook secret: Render generates one; read it from the dashboard and
+      #     configure your deploy notifier / Railway webhook with the same value ---
+      - key: BEACON_WEBHOOK_SECRET
+        generateValue: true
+
+      # --- optional / defaults ---
+      - key: LD_ENVIRONMENT_KEY
+        value: production
+      - key: LD_BASE_URL
+        value: https://app.launchdarkly.com
+      - key: BEACON_MONITOR
+        value: "true"
+      - key: BEACON_MONITOR_POLL_MS
+        value: "10000"
+      # Persist deploy-state (last-seen SHA per service) across restarts.
+      - key: BEACON_STATE_FILE
+        value: /data/beacon-state.json
+
+    # Persistent disk so previousSha tracking survives container replacement.
+    disk:
+      name: beacon-state
+      mountPath: /data
+      sizeGB: 1
