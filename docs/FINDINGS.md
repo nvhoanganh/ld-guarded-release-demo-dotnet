@@ -377,6 +377,93 @@ PR containing code it **could not compile or verify**.
 
 ---
 
+## Finding 13 — The agent's improvement isn't sticky: metric quality is non-deterministic run-to-run
+
+After the metrics-author was taught to reuse existing metrics and reason about the
+randomization unit (Findings 2/3/8/9), it did exactly that on one PR — and then
+**regressed on the very next one, with the same config.**
+
+| | PR #4 (richer recs) | PR #5 (tiny latency bump — same config) |
+|---|---|---|
+| Latency guardrail | **reused `http-latency-checkout`** ✓ | **authored a new `…-latency` metric** ✗ |
+| Metric has data? | yes (OTel event, both arms) | **no** — event metric the code never emits → **blind** |
+| Randomization unit | **`request`, with reasoning** ✓ | **defaulted to `user`** ✗ |
+| Manifest notes | accurate | **called it "trace-backed" when it's a custom event** ✗ |
+
+Same agent instructions, same kind of change, **opposite (and wrong) output.** On
+PR #5 a human had to catch the blind metric and swap the guardrail to
+`http-latency-checkout` again — the exact fix from PR #1, re-applied.
+
+**Why it matters:** a config edit that improves the agent *on average* does **not
+guarantee** the behavior on any given PR. You cannot "fix the prompt once" and
+trust it — the agent is a sampler, not a program. This is the deeper limitation
+behind Findings 2/3/9: even after teaching, **every run needs verification**,
+because the guardrail can silently be blind again.
+
+**Remediation (belt-and-suspenders, since the prompt alone isn't reliable):**
+- **A deterministic post-check** (not another agent): after the metrics-author
+  runs, a code check that (a) every manifest `metricKey` exists, (b) each is
+  receiving events / is a known-good shared metric, and (c) the randomization unit
+  matches. Fail the run (or hold) if not. This is the data-flow check from Finding 4,
+  made mandatory — the only reliable guard against a non-deterministic author.
+- **Prefer a fixed policy over agent choice for the guardrail metric** where a
+  canonical one exists (e.g. always attach the endpoint's `http.latency;route=…`
+  metric for a latency-bearing change), leaving the agent to *add* diagnostics, not
+  *pick* the gate.
+
+---
+
+## Finding 14 (headline) — No practical-significance threshold: auto-rollback fires on *any* real regression, however small
+
+This is the most consequential finding for real-world use. LaunchDarkly's guarded
+rollback is **statistical-significance-based with no effect-size tolerance** — you
+cannot say *"roll back only if >X% worse."* Verified live, twice:
+
+| Change (code) | measured v1 vs control | samples | Load | Outcome |
+|---|---|---|---|---|
+| enrichment `200-400` | **+26.6 ms** (594 vs 568) | — | 50 VUs | rolled back in ~62s |
+| tiny bump `230-330` | **+17 ms** (579 vs 562), CI **1.9–32.1 ms** | **171** | **10 VUs** | rolled back in ~2m11s |
+
+Both were **regression** reverts (not "insufficient sample size"). The tiny-bump
+run is the decisive one: **only 171 request samples at a gentle 10 VUs**, a **+17ms
+(~3%)** difference, and the **confidence interval's lower bound was 1.9 ms > 0** — so
+LD was confident v1 is *at least ~2ms worse* and rolled back. Lowering load from
+50→10 VUs did not save it; it just took 2 min instead of 60s.
+
+**Why even +10ms is caught — the standard error:**
+
+```
+SEM = σ / √n
+```
+
+Per-request latency spread here is σ ≈ ~45ms (fraud + enrich variance). At 10 VUs
+for ~2 min → ~470 v1 samples → SEM ≈ 45/√470 ≈ **~2ms**. So a **+10ms** mean
+difference is **~5 standard errors** → overwhelmingly significant → rollback. As
+sample size grows, **SEM → 0**, so **any genuine regression — +2ms, +1ms — becomes
+significant given enough traffic.** Real production volume (millions of requests)
+makes the SEM microscopic; a *reproducible* sub-1% regression will trip it.
+
+**Consequence:** in real life **every release carries some small, acceptable latency
+delta.** A significance-only gate rolls back on all of them once traffic is high
+enough → guarded rollout **over-triggers and is unusable as-is** for normal
+services. This is exactly the "this won't work in production" concern: there is no
+knob to express *"I accept up to 2% slower."*
+
+**Remediations:**
+- **Ideal:** a configurable **practical-significance / minimum-effect threshold** on
+  the guarded rollout (*"roll back only if worse by >X% with confidence"*). Not
+  exposed in the release API this pipeline uses; an open ask for the LD
+  guarded-rollout product team. (We could not confirm LD supports one anywhere — the
+  instruction surface here only has `autoRollback: true/false`.)
+- **Practical workaround today — bake tolerance into the *metric*:** monitor a
+  metric that only registers requests **over an SLO** (e.g. count of requests
+  >800ms), or a high percentile, so a small median shift that stays within SLO
+  **doesn't register as a regression at all.** This moves "how much is acceptable"
+  from the (absent) rollout threshold into the metric definition — the real-world way
+  teams make guarded rollouts usable.
+
+---
+
 ## Can a runtime metric check even work if the metric is on the dark path?
 
 A fair objection: if a metric only fires on the new (dark) code, you can't verify
@@ -438,6 +525,8 @@ shared-path metrics. The in-flight "zero samples = broken, not healthy" check
 | 10 | Flag cleanup out of scope — code + flag debt piles up | A real Phase 3: on a terminal release, an agent opens a cleanup PR (inline winner / delete loser, remove flag) guided by code-refs |
 | 11 | Cleanup PR triggers Phase 1 (loop feared) — but the classifier correctly skipped | Observed live: no re-flag. Make the skip **explicit + cleanup-aware in the research-planner** (title/branch/diff-shape), not a per-repo CI YAML guard — the decision belongs in the factory's control plane |
 | 12 | Cleanup conflates a *reverted* release with an *abandoned* feature; pushed an unverified build | Auto-clean only on a *completed* release; **hold on revert**; carry abandon-vs-retry intent explicitly; never push a cleanup that fails to build |
+| 13 | Agent improvement isn't sticky — metric quality is non-deterministic run-to-run | A **deterministic post-check** (every metricKey exists + receives data + unit matches; fail/hold otherwise); prefer a fixed policy for the guardrail metric, let the agent add diagnostics |
+| 14 **(headline)** | No practical-significance threshold — auto-rollback fires on *any* real regression (verified +17ms/3% at 171 samples) | A configurable **effect-size tolerance** (`>X% worse`) — not exposed by the API here, an ask for the LD product team; **workaround: SLO-shaped metric** (count requests over a threshold) so small in-SLO shifts don't register |
 
 **The one-line takeaway for a design partner:** the orchestration is real and it
 works — and the **improvement loop is real too** (we fixed an agent as config and
