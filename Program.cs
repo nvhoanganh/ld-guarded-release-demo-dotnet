@@ -97,6 +97,9 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     // Old checkout: fast, stable.
     await Task.Delay(Random.Shared.Next(50, 100));
 
+    // Screen the order for fraud before completing checkout.
+    await ScreenForFraud(req.UserId, req.CartTotal);
+
     // Evaluate recommendations flag; fail-safe default 'control' means no enrichment.
     var recsVariation = ld.StringVariation("enable-checkout-recommendations", context, "control");
 
@@ -126,6 +129,13 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
         recommendations
     });
 });
+
+// Fraud screening for a checkout. Calls the risk-scoring service, so it adds
+// latency to every checkout request.
+static async Task ScreenForFraud(string userId, decimal cartTotal)
+{
+    await Task.Delay(Random.Shared.Next(180, 260));
+}
 
 // Personalized add-on recommendations for the checkout page. Calls the
 // recommendations model, so it adds latency to every checkout request.
