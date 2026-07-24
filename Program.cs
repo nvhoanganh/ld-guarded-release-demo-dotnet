@@ -18,7 +18,14 @@ if (sdkKey == "YOUR_SDK_KEY_HERE")
 // Build the LdClient with the Observability plugin attached.
 // The plugin registers OTel instrumentation into builder.Services, so it must
 // be constructed BEFORE builder.Build().
+// In the "Test" ASPNETCORE_ENVIRONMENT, skip the 5-second LD initialization wait so
+// integration tests start quickly against a TestData-backed client.
+var ldStartWait = builder.Environment.EnvironmentName == "Test"
+    ? TimeSpan.Zero
+    : TimeSpan.FromSeconds(5);
+
 var ldConfig = Configuration.Builder(sdkKey)
+    .StartWaitTime(ldStartWait)
     .Plugins(new PluginConfigurationBuilder()
         .Add(ObservabilityPlugin.Builder(builder.Services)
             .WithServiceName("guarded-release-demo")
@@ -97,8 +104,20 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     // Old checkout: fast, stable.
     await Task.Delay(Random.Shared.Next(50, 100));
 
-    // Screen the order for fraud before completing checkout.
-    await ScreenForFraud(req.UserId, req.CartTotal);
+    // Evaluate fraud-screening flag; fail-safe default 'control' means no fraud check.
+    var fraudVariation = ld.StringVariation("enable-fraud-screening", context, "control");
+    if (fraudVariation == "v1")
+    {
+        try
+        {
+            await ScreenForFraud(req.UserId, req.CartTotal);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "ScreenForFraud failed for {UserId}", req.UserId);
+            ld.Track("enable-fraud-screening-error", context);
+        }
+    }
 
     // Evaluate recommendations flag; fail-safe default 'control' means no enrichment.
     var recsVariation = ld.StringVariation("enable-checkout-recommendations", context, "control");
@@ -119,6 +138,8 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
 
     sw.Stop();
 
+    ld.Track("enable-fraud-screening-latency", context, LdValue.Null, sw.ElapsedMilliseconds);
+    ld.Track("enable-fraud-screening-checkout-complete", context);
     ld.Track("enable-checkout-recommendations-business", context);
     return Results.Ok(new
     {
@@ -148,3 +169,6 @@ static async Task<string[]> EnrichCheckout(string userId)
 app.Run();
 
 public record CheckoutRequest(string UserId, decimal CartTotal);
+
+// Required so WebApplicationFactory<Program> can reference this type from the test project.
+public partial class Program { }
