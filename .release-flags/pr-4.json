@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.2",
+  "flagKey": "enable-richer-recommendations",
+  "scope": "backend",
+  "releasePlan": {
+    "metricKeys": [
+      "http-latency-checkout"
+    ],
+    "randomizationUnit": "request",
+    "notes": "Flag gates EnrichCheckout: control returns 3-item recommendations at 220-320ms; v1 returns 5-item recommendations (adds loyalty-points, price-match) at 200-400ms. Monitor http-latency-checkout (OTel auto-emitted, fires on both arms) as the primary guardrail for latency regression at p95/p99. Randomization unit is request (per-request latency change, no stickiness requirement; multi-context already carries a unique request-kind key). No prerequisite: this flag gates the old-checkout arm which is the active dominant path (new-checkout-flow = false for all production traffic)."
+  },
+  "releaseIntent": {
+    "_instructions": "Human approver: edit freely. action: auto (release on deploy) | hold (do not release yet) | manual (a human runs the release). Structured fields execute; anything else goes in notes (an agent will structure it on the PR for your review). Blank fields = default auto-release on deploy. prerequisites: [{\"flagKey\": \"flag-xyz\", \"variation\": \"on\"}]. notBefore: YYYY-MM-DD. reference: ticket/doc URL.",
+    "action": "auto",
+    "notBefore": "",
+    "segments": [],
+    "prerequisites": [],
+    "releaseWith": [],
+    "reference": "",
+    "approvedBy": "",
+    "notes": ""
+  }
+}
