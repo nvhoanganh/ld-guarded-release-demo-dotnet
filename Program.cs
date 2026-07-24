@@ -113,7 +113,7 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     {
         recommendations = await EnrichCheckout(req.UserId, ld, context);
         recSw.Stop();
-        ld.Track("enable-richer-recommendations-latency", context, null, recSw.ElapsedMilliseconds);
+        ld.Track("enable-richer-recommendations-latency", context, LdValue.Null, recSw.ElapsedMilliseconds);
         ld.Track("enable-richer-recommendations-checkout-success", context);
     }
     catch (Exception ex)
@@ -161,3 +161,6 @@ static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context c
 app.Run();
 
 public record CheckoutRequest(string UserId, decimal CartTotal);
+
+// Expose Program to the test project so WebApplicationFactory<Program> can boot the app.
+public partial class Program { }
