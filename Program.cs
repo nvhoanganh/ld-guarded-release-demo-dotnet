@@ -96,6 +96,10 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
 
     // Old checkout: fast, stable.
     await Task.Delay(Random.Shared.Next(50, 100));
+
+    // Enrich the order with personalized add-on recommendations before returning.
+    var recommendations = await EnrichCheckout(req.UserId);
+
     sw.Stop();
 
     return Results.Ok(new
@@ -103,9 +107,18 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
         engine = "v1",
         orderId = Guid.NewGuid().ToString("N"),
         processingMs = sw.ElapsedMilliseconds,
-        cartTotal = req.CartTotal
+        cartTotal = req.CartTotal,
+        recommendations
     });
 });
+
+// Personalized add-on recommendations for the checkout page. Calls the
+// recommendations model, so it adds latency to every checkout request.
+static async Task<string[]> EnrichCheckout(string userId)
+{
+    await Task.Delay(Random.Shared.Next(220, 320));
+    return new[] { "extended-warranty", "gift-wrap", "express-shipping" };
+}
 
 app.Run();
 
