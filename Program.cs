@@ -157,3 +157,6 @@ static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context c
 app.Run();
 
 public record CheckoutRequest(string UserId, decimal CartTotal);
+
+// Required so WebApplicationFactory<Program> can reference this type from the test assembly.
+public partial class Program { }
