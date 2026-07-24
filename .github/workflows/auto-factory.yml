@@ -26,16 +26,11 @@ permissions:
 jobs:
   auto-factory:
     runs-on: ubuntu-latest
-    # Loop guards:
-    #  - agent commits carry [skip ci], so AutoFactory's own pushes never re-run it.
-    #  - flag-CLEANUP PRs must be skipped, or AutoFactory re-flags the code a cleanup
-    #    agent (e.g. Vega) just removed. Cleanup PRs are identified by the `vega-pr`
-    #    label OR a `vega/` head-branch prefix. (A label check alone isn't enough:
-    #    the label may be added after `opened` fires, so we also match the branch.)
-    if: >-
-      github.actor != 'github-actions[bot]'
-      && !startsWith(github.head_ref, 'vega/')
-      && !contains(github.event.pull_request.labels.*.name, 'vega-pr')
+    # CI-loop guard: agent commits carry [skip ci], so AutoFactory's own pushes
+    # never re-run it. Flag-CLEANUP PRs (e.g. from Vega) are recognized and skipped
+    # by the research-planner agent itself — the decision lives in the factory's
+    # control plane (the LD AI config), not hardcoded here per-repo.
+    if: github.actor != 'github-actions[bot]'
     steps:
       # The code under analysis = the PR's head branch (so agent commits push back cleanly).
       - name: Check out the PR code
