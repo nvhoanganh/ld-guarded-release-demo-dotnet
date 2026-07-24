@@ -8,6 +8,14 @@
         <AssemblyName>GuardedReleaseDemo</AssemblyName>
     </PropertyGroup>
 
+    <!-- Exclude the test sub-project so the SDK glob doesn't pick up test .cs files. -->
+    <ItemGroup>
+        <Compile Remove="GuardedReleaseDemo.Tests\**" />
+        <Content Remove="GuardedReleaseDemo.Tests\**" />
+        <EmbeddedResource Remove="GuardedReleaseDemo.Tests\**" />
+        <None Remove="GuardedReleaseDemo.Tests\**" />
+    </ItemGroup>
+
     <ItemGroup>
         <PackageReference Include="LaunchDarkly.ServerSdk" Version="8.*" />
         <PackageReference Include="LaunchDarkly.Observability" Version="1.*" />
