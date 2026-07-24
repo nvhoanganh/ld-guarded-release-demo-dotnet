@@ -103,11 +103,20 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     string[]? recommendations = null;
     if (recsVariation == "v1")
     {
-        recommendations = await EnrichCheckout(req.UserId);
+        try
+        {
+            recommendations = await EnrichCheckout(req.UserId);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "EnrichCheckout failed for {UserId}", req.UserId);
+            ld.Track("enable-checkout-recommendations-error", context);
+        }
     }
 
     sw.Stop();
 
+    ld.Track("enable-checkout-recommendations-business", context);
     return Results.Ok(new
     {
         engine = "v1",
