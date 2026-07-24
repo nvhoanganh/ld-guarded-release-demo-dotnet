@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Release Console — Beacon demo</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}html,body{min-height:100%}</style>
+</head>
+<body>
+<style>
+  :root {
+    --bg: #0e1016;
+    --bg-grid: #171a22;
+    --panel: #171b24;
+    --panel-2: #1d222d;
+    --line: #262c39;
+    --ink: #e7e9f0;
+    --ink-dim: #b9bdca;
+    --muted: #868da0;
+    --accent: #6c8cff;
+    --accent-soft: #6c8cff26;
+    --good: #35d0a0;
+    --warn: #f2b03d;
+    --crit: #ff5d73;
+    --good-soft: #35d0a01f;
+    --warn-soft: #f2b03d1f;
+    --crit-soft: #ff5d731f;
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f5f8;
+      --bg-grid: #eceef3;
+      --panel: #ffffff;
+      --panel-2: #f5f6fa;
+      --line: #e2e5ec;
+      --ink: #1a1d26;
+      --ink-dim: #3d4351;
+      --muted: #6a7186;
+      --accent: #4763e0;
+      --accent-soft: #4763e015;
+      --good: #10936c;
+      --warn: #b9791a;
+      --crit: #d83a52;
+      --good-soft: #10936c14;
+      --warn-soft: #b9791a14;
+      --crit-soft: #d83a5214;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1016; --bg-grid: #171a22; --panel: #171b24; --panel-2: #1d222d;
+    --line: #262c39; --ink: #e7e9f0; --ink-dim: #b9bdca; --muted: #868da0;
+    --accent: #6c8cff; --accent-soft: #6c8cff26;
+    --good: #35d0a0; --warn: #f2b03d; --crit: #ff5d73;
+    --good-soft: #35d0a01f; --warn-soft: #f2b03d1f; --crit-soft: #ff5d731f;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f8; --bg-grid: #eceef3; --panel: #ffffff; --panel-2: #f5f6fa;
+    --line: #e2e5ec; --ink: #1a1d26; --ink-dim: #3d4351; --muted: #6a7186;
+    --accent: #4763e0; --accent-soft: #4763e015;
+    --good: #10936c; --warn: #b9791a; --crit: #d83a52;
+    --good-soft: #10936c14; --warn-soft: #b9791a14; --crit-soft: #d83a5214;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: var(--sans);
+    color: var(--ink);
+    background:
+      radial-gradient(1200px 600px at 80% -10%, var(--accent-soft), transparent 60%),
+      var(--bg);
+    min-height: 100vh;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 20px 64px; }
+
+  /* ---- top bar ---- */
+  header.top {
+    display: flex; align-items: center; gap: 16px;
+    padding: 6px 2px 20px;
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 38px; height: 38px; border-radius: 11px;
+    background: linear-gradient(150deg, var(--accent), #9a6cff);
+    display: grid; place-items: center; font-size: 19px;
+    box-shadow: 0 6px 20px -8px var(--accent);
+  }
+  .brand h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; font-weight: 650; }
+  .brand p { margin: 0; font-size: 12px; color: var(--muted); }
+  .brand p b { color: var(--ink-dim); font-weight: 600; }
+  .top .spacer { flex: 1; }
+  .badge {
+    font: 600 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
+    padding: 7px 10px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--warn); background: var(--warn-soft);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+  button.ghost {
+    background: var(--panel); color: var(--ink-dim); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 11px; font-size: 13px; cursor: pointer;
+    font-family: var(--sans);
+  }
+  button.ghost:hover { border-color: var(--accent); color: var(--ink); }
+
+  /* ---- layout ---- */
+  .grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px;
+  }
+  .panel + .panel { margin-top: 18px; }
+  .col-side { display: flex; flex-direction: column; gap: 18px; }
+
+  .eyebrow {
+    font: 600 11px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 14px;
+  }
+
+  label.field { display: block; margin-bottom: 13px; }
+  label.field span {
+    display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; font-weight: 500;
+  }
+  input, select {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--ink); border-radius: 9px; padding: 9px 11px;
+    font: 13px/1.3 var(--mono); appearance: none;
+  }
+  select { font-family: var(--sans); cursor: pointer; }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+
+  button.go {
+    width: 100%; margin-top: 4px; border: 0; cursor: pointer;
+    background: linear-gradient(150deg, var(--accent), #8a6cff);
+    color: #fff; font: 600 14px/1 var(--sans);
+    padding: 13px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    box-shadow: 0 8px 22px -10px var(--accent);
+  }
+  button.go:hover { filter: brightness(1.06); }
+  button.go:disabled { opacity: .55; cursor: default; filter: none; }
+  button.go.next { background: var(--panel-2); color: var(--ink); border: 1px solid var(--accent); box-shadow: none; }
+  button.go.next:hover { background: var(--accent-soft); filter: none; }
+  button.go.next kbd {
+    font: 600 11px/1 var(--mono); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 5px; padding: 3px 5px; color: var(--muted);
+  }
+  /* request card: reveal when the flow hits the webhook → Beacon moment */
+  .reqcard {
+    transition: opacity .35s, transform .35s, border-color .35s, box-shadow .35s;
+  }
+  .reqcard.dim { opacity: .4; }
+  .reqcard.live {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 12px 34px -18px var(--accent);
+  }
+  .reqcard.live .eyebrow { color: var(--accent); }
+  .fired {
+    display: none; margin: 11px 0 0; font: 600 12px/1.4 var(--mono);
+    color: var(--good); align-items: center; gap: 7px;
+  }
+  .reqcard.live .fired { display: flex; }
+  .stepHint { font-size: 11.5px; color: var(--muted); text-align: center; margin: 10px 0 0; }
+  .stepHint b { color: var(--ink-dim); font-weight: 600; }
+
+  /* SHA lineage: developer commit → agent commit (PR) → merge → deployed */
+  .shaflow {
+    display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+    margin: -4px 0 4px; padding: 10px 11px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+  }
+  .sharow { display: flex; align-items: center; gap: 9px; }
+  .shapill {
+    font: 600 11px/1 var(--mono); padding: 5px 7px; border-radius: 6px;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+    min-width: 64px; text-align: center; flex: 0 0 auto;
+    transition: color .3s, background .3s, border-color .3s;
+  }
+  .shacap { font-size: 11px; color: var(--muted); line-height: 1.3; }
+  .shacap b { color: var(--good); font-weight: 600; }
+  .shapill.on { color: var(--ink); border-color: var(--muted); }
+  .shapill.chg {
+    color: var(--warn); background: var(--warn-soft); border-color: var(--warn);
+    animation: shaFlash 1.1s ease-out;
+  }
+  .shapill.dep {
+    color: var(--good); background: var(--good-soft); border-color: var(--good);
+    animation: shaFlash 1.1s ease-out;
+  }
+  @keyframes shaFlash {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 var(--warn); }
+    30% { transform: scale(1.09); }
+    100% { transform: scale(1); box-shadow: 0 0 0 6px transparent; }
+  }
+  .shaAr { color: var(--muted); font-size: 12px; padding-left: 24px; line-height: 1; }
+  .stage[data-state="next"] {
+    border-color: var(--accent); border-style: dashed;
+    animation: pulse 1.3s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 0 var(--accent-soft);} 50%{ box-shadow: 0 0 0 4px var(--accent-soft);} }
+  .stage[data-state="next"] .ic { border-color: var(--accent); color: var(--accent); }
+  .stage[data-state="next"] .ic::after { content: "→"; }
+  button.go .spin {
+    width: 14px; height: 14px; border: 2px solid #ffffff70; border-top-color: #fff;
+    border-radius: 50%; animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---- request preview ---- */
+  .req {
+    font: 12px/1.65 var(--mono); color: var(--ink-dim);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 13px; overflow-x: auto; white-space: pre;
+  }
+  .req .mv { color: var(--accent); font-weight: 600; }
+  .req .k { color: var(--muted); }
+  .req .s { color: var(--good); }
+  .req .sec { color: var(--warn); }
+  .note {
+    font-size: 12px; color: var(--muted); margin: 12px 0 0; line-height: 1.55;
+  }
+  .note b { color: var(--ink-dim); font-weight: 600; }
+
+  /* ---- pipeline ---- */
+  .phase { margin-bottom: 16px; }
+  .phase:last-child { margin-bottom: 0; }
+  .phase-h {
+    font-size: 12px; color: var(--muted); margin: 0 0 9px;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .tag {
+    font: 600 10px/1 var(--mono); letter-spacing: .07em; text-transform: uppercase;
+    padding: 5px 8px; border-radius: 6px; border: 1px solid transparent;
+  }
+  .tag.ci { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+  .tag.dep { color: var(--warn); background: var(--warn-soft); border-color: var(--warn); }
+  .tag.beacon { color: var(--good); background: var(--good-soft); border-color: var(--good); }
+  .phase-note {
+    font-size: 12px; line-height: 1.5; color: var(--muted);
+    background: var(--good-soft); border: 1px solid var(--good);
+    border-radius: 9px; padding: 9px 12px; margin: 0 0 10px;
+  }
+  .phase-note b { color: var(--ink); font-weight: 600; }
+  .phase-note code { font: 11px/1 var(--mono); color: var(--good); }
+  .row { display: flex; align-items: stretch; gap: 8px; flex-wrap: wrap; }
+  .conn { align-self: center; color: var(--muted); font-size: 15px; flex: 0 0 auto; }
+  @media (max-width: 620px){ .conn { display: none; } }
+
+  .stage {
+    position: relative; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 11px; padding: 11px 12px 12px; min-height: 84px;
+    flex: 1 1 130px; min-width: 128px;
+    transition: border-color .25s, background .25s, transform .25s;
+  }
+  .stage .num {
+    font: 600 10px/1 var(--mono); letter-spacing: .1em; color: var(--muted);
+  }
+  .stage h3 { margin: 8px 0 3px; font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
+  .stage p { margin: 0; font-size: 11px; color: var(--muted); line-height: 1.4; }
+  .stage p b { color: var(--ink-dim); font-weight: 600; }
+  .stage code { font: 10.5px/1 var(--mono); color: var(--ink-dim); }
+  .stage .ic {
+    position: absolute; top: 12px; right: 12px; width: 20px; height: 20px;
+    border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center;
+    font-size: 11px; color: transparent;
+  }
+  .stage[data-state="active"] {
+    border-color: var(--accent); background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .stage[data-state="active"] .ic { border-color: var(--accent); border-right-color: transparent; animation: spin .7s linear infinite; }
+  .stage[data-state="done"] .ic { border-color: var(--good); background: var(--good); color: #06231a; }
+  .stage[data-state="done"] .ic::after { content: "✓"; }
+  .stage[data-state="skip"] { opacity: .45; }
+  .stage[data-state="fail"] .ic { border-color: var(--crit); background: var(--crit); color: #2a0710; }
+  .stage[data-state="fail"] .ic::after { content: "!"; font-weight: 700; }
+
+  /* ---- monitor ---- */
+  .mon-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .mon-head .flag { font: 13px/1 var(--mono); color: var(--ink); font-weight: 600; }
+  .track {
+    position: relative; height: 42px; border-radius: 10px; overflow: hidden;
+    background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .track .fill {
+    position: absolute; inset: 0 100% 0 0; border-radius: 0 8px 8px 0;
+    background: linear-gradient(90deg, var(--good), #4be0b6);
+    transition: right .9s cubic-bezier(.4,.1,.2,1);
+    display: flex; align-items: center; justify-content: flex-end; padding-right: 10px;
+    font: 600 12px/1 var(--mono); color: #06231a;
+  }
+  .track.reverting .fill { background: linear-gradient(90deg, var(--crit), #ff8497); color: #2a0710; }
+  .ticks { display: flex; justify-content: space-between; margin-top: 7px; }
+  .ticks span { font: 11px/1 var(--mono); color: var(--muted); }
+  .metric-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .metric {
+    flex: 1; min-width: 130px; background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 10px; padding: 11px 12px;
+  }
+  .metric .lab { font: 500 11px/1 var(--sans); color: var(--muted); }
+  .metric .val { font: 600 18px/1.1 var(--mono); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .metric.ok .val { color: var(--good); }
+  .metric.bad .val { color: var(--crit); }
+
+  /* ---- outcomes / inspector ---- */
+  .chips { display: flex; flex-direction: column; gap: 9px; }
+  .chip {
+    display: flex; align-items: center; gap: 11px; padding: 11px 13px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .chip .fk { font: 13px/1 var(--mono); font-weight: 600; flex: 1; }
+  .chip .scope { font: 11px/1 var(--mono); color: var(--muted); }
+  .pill {
+    font: 600 11px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase;
+    padding: 6px 9px; border-radius: 999px; border: 1px solid transparent;
+  }
+  .pill.released, .pill.completed { color: var(--good); background: var(--good-soft); border-color: var(--good); }
+  .pill.waiting { color: var(--warn); background: var(--warn-soft); border-color: var(--warn); }
+  .pill.reverted, .pill.error { color: var(--crit); background: var(--crit-soft); border-color: var(--crit); }
+  .pill.noop, .pill.already_running { color: var(--muted); background: var(--panel); border-color: var(--line); }
+
+  .resp {
+    margin-top: 14px; font: 12px/1.6 var(--mono); color: var(--ink-dim);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 13px; overflow-x: auto; white-space: pre; max-height: 260px; overflow-y: auto;
+  }
+  .resp .jk { color: var(--accent); }
+  .resp .js { color: var(--good); }
+  .resp .jn { color: var(--warn); }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 2px; }
+
+  .log { margin-top: 14px; display: flex; flex-direction: column; gap: 4px; }
+  .log div { font: 12px/1.5 var(--mono); color: var(--muted); }
+  .log div b { color: var(--ink-dim); font-weight: 600; }
+  .log .rel { color: var(--good); }
+  .log .rev { color: var(--crit); }
+
+  h2.sec { font-size: 15px; margin: 0 0 3px; letter-spacing: -0.01em; }
+  .sub { font-size: 12.5px; color: var(--muted); margin: 0 0 16px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001s !important; transition-duration: .001s !important; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="logo">📡</div>
+      <div>
+        <h1>Release Console</h1>
+        <p>AutoFactory · <b>PR → guarded release</b> · full pipeline demo</p>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <span class="badge" id="modeBadge"><span class="dot"></span> Mock mode</span>
+    <button class="ghost" id="themeBtn">◐ Theme</button>
+  </header>
+
+  <div class="grid">
+    <!-- LEFT: trigger + how it talks to Beacon -->
+    <div class="col-side">
+      <div class="panel">
+        <p class="eyebrow">Change under release</p>
+        <label class="field">
+          <span>Service</span>
+          <select id="service">
+            <option value="guarded-release-demo">guarded-release-demo</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Developer's commit SHA</span>
+          <input id="sha" value="a1b2c3d" spellcheck="false" />
+        </label>
+        <div class="shaflow" id="shaFlow">
+          <div class="sharow"><span class="shapill on" id="shaO">a1b2c3d</span><span class="shacap">developer's commit</span></div>
+          <div class="shaAr">↓</div>
+          <div class="sharow"><span class="shapill" id="shaA">…</span><span class="shacap">agent commit · PR branch</span></div>
+          <div class="shaAr">↓</div>
+          <div class="sharow"><span class="shapill" id="shaD">…</span><span class="shacap">merge → deployed <b>(SHA Beacon sees)</b></span></div>
+        </div>
+        <select id="scenario" hidden>
+          <option value="released" selected>New flag → guarded release</option>
+          <option value="reverted">Metric regresses → auto-rollback</option>
+          <option value="waiting">Fullstack — other side not deployed</option>
+          <option value="noop">No new manifest (nothing to do)</option>
+          <option value="unknown">Unknown service (400)</option>
+        </select>
+        <button class="go" id="goBtn"><span id="goIcon">▸</span> <span id="goText">Start walkthrough — open PR</span></button>
+        <p class="stepHint" id="stepHint" style="display:none">
+          <b>click</b>, <b>Space</b>, <b>Enter</b> or <b>→</b> to advance
+        </p>
+      </div>
+
+      <div class="panel reqcard" id="reqCard">
+        <p class="eyebrow">How it talks to Beacon</p>
+        <div class="req" id="reqPreview"></div>
+        <div class="fired" id="reqFired">● request delivered → Beacon (HTTP 200)</div>
+        <p class="note">
+          Sent to Beacon's <b>/flag-releases</b> webhook with the
+          <b>x-beacon-secret</b> header. Browser → Beacon is cross-origin, so a real
+          deploy uses one of: <b>(A)</b> Beacon CORS + secret held in the page, or
+          <b>(B)</b> a tiny proxy that keeps the secret server-side.
+        </p>
+      </div>
+    </div>
+
+    <!-- MAIN -->
+    <div>
+      <div class="panel">
+        <h2 class="sec">Pipeline</h2>
+        <p class="sub">From a developer's pull request to a self-monitoring guarded release.</p>
+
+        <div class="phase">
+          <div class="phase-h"><span class="tag ci">Phase 1 · CI</span> runs in GitHub Actions, per pull request</div>
+          <div class="row">
+            <div class="stage" id="p1a" data-state="idle">
+              <div class="num">01</div><div class="ic"></div>
+              <h3>Open PR</h3><p>Developer pushes a change</p>
+            </div>
+            <div class="conn">→</div>
+            <div class="stage" id="p1b" data-state="idle">
+              <div class="num">02</div><div class="ic"></div>
+              <h3>Analyse risk</h3><p>Classify change · decide flag action</p>
+            </div>
+            <div class="conn">→</div>
+            <div class="stage" id="p1c" data-state="idle">
+              <div class="num">03</div><div class="ic"></div>
+              <h3>Create flag</h3><p>Multivariate flag in LD, created <b>dark</b></p>
+            </div>
+            <div class="conn">→</div>
+            <div class="stage" id="p1d" data-state="idle">
+              <div class="num">04</div><div class="ic"></div>
+              <h3>Wrap + manifest</h3><p>Gate code · write <code>.release-flags/</code> · commit</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-h"><span class="tag dep">Deploy</span> your infra ships the merged code</div>
+          <div class="row">
+            <div class="stage" id="d1" data-state="idle">
+              <div class="num">05</div><div class="ic"></div>
+              <h3>Deploy</h3><p>Railway builds &amp; releases the service</p>
+            </div>
+            <div class="conn">→</div>
+            <div class="stage" id="d2" data-state="idle">
+              <div class="num">06</div><div class="ic"></div>
+              <h3>Deploy webhook</h3><p>Railway POSTs the deployed SHA → Beacon</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="phase">
+          <div class="phase-h"><span class="tag beacon">Phase 2 · Beacon</span> the release orchestrator you host</div>
+          <div class="phase-note">
+            🐳 A small <b>Docker container you run on your own infra</b> (Railway, Render, ECS, k8s…).
+            It needs a <b>public HTTPS endpoint</b> so deploy webhooks can reach <code>/flag-releases</code>.
+            No LaunchDarkly-hosted service — you own it.
+          </div>
+          <div class="row">
+            <div class="stage" id="b1" data-state="idle">
+              <div class="num">07</div><div class="ic"></div>
+              <h3>Notify</h3><p>/flag-releases · secret checked</p>
+            </div>
+            <div class="conn">→</div>
+            <div class="stage" id="b2" data-state="idle">
+              <div class="num">08</div><div class="ic"></div>
+              <h3>Discover</h3><p>Diff <code>.release-flags/</code> vs previous SHA</p>
+            </div>
+            <div class="conn">→</div>
+            <div class="stage" id="b3" data-state="idle">
+              <div class="num">09</div><div class="ic"></div>
+              <h3>Trigger</h3><p>Start guarded release via LD API</p>
+            </div>
+            <div class="conn">→</div>
+            <div class="stage" id="b4" data-state="idle">
+              <div class="num">10</div><div class="ic"></div>
+              <h3>Monitor</h3><p>Poll → completed / reverted</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" id="monPanel" style="display:none">
+        <div class="mon-head">
+          <h2 class="sec">Guarded release</h2>
+          <span class="flag" id="monFlag">new-checkout-flow</span>
+        </div>
+        <div class="track" id="track"><div class="fill" id="fill">0%</div></div>
+        <div class="ticks"><span>0%</span><span>20%</span><span>50%</span><span>100%</span></div>
+        <div class="metric-row">
+          <div class="metric ok" id="mLatency"><div class="lab">http-latency-checkout</div><div class="val">— ms</div></div>
+          <div class="metric ok" id="mErr"><div class="lab">error rate</div><div class="val">— %</div></div>
+          <div class="metric" id="mState"><div class="lab">release state</div><div class="val" style="color:var(--muted)">idle</div></div>
+        </div>
+        <div class="log" id="monLog"></div>
+      </div>
+
+      <div class="panel">
+        <h2 class="sec">Beacon response</h2>
+        <p class="sub">Outcomes per discovered flag, then the raw JSON Beacon returns.</p>
+        <div class="chips" id="chips"><div class="empty">Run a deploy to see outcomes.</div></div>
+        <div class="resp" id="resp" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var BEACON = "https://launchdarkly-autofactory-production.up.railway.app";
+
+  // ---- commit-SHA lineage ----------------------------------------------
+  // developer's commit → (agent commits flag wiring + manifest) → (merge) deployed.
+  // The SHA that actually deploys is NOT the developer's original commit.
+  function mkSha(seed) {
+    var h = 2166136261;
+    for (var i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = (h * 16777619) >>> 0; }
+    return ("0000000" + h.toString(16)).slice(-7);
+  }
+  var SHA = { orig: "a1b2c3d", agent: "", deployed: "" };
+  function computeShas(orig) {
+    SHA.orig = orig; SHA.agent = mkSha(orig + ":agent"); SHA.deployed = mkSha(orig + ":merge");
+  }
+  function shaReset() {
+    var o = $("shaO"), a = $("shaA"), d = $("shaD");
+    o.className = "shapill on"; o.textContent = SHA.orig;
+    a.className = "shapill"; a.textContent = "…";
+    d.className = "shapill"; d.textContent = "…";
+  }
+  function shaAgent() {
+    var a = $("shaA"); a.className = "shapill chg"; a.textContent = SHA.agent;
+  }
+  function shaDeployed() {
+    var a = $("shaA"); a.className = "shapill on"; a.textContent = SHA.agent;
+    var d = $("shaD"); d.className = "shapill dep"; d.textContent = SHA.deployed;
+  }
+
+  // ---- theme ----
+  $("themeBtn").addEventListener("click", function () {
+    var root = document.documentElement;
+    var cur = root.getAttribute("data-theme");
+    if (!cur) cur = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+  });
+
+  // ---- live request preview ----
+  function esc(s){ return String(s).replace(/[&<>]/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];}); }
+  // The webhook carries the DEPLOYED sha (post-merge), not the developer's.
+  // Before the flow runs, preview the developer's input; once running, the deployed one.
+  function renderReq(useDeployed) {
+    var svc = $("service").value;
+    var sha = useDeployed ? SHA.deployed : ($("sha").value || "unknown");
+    $("reqPreview").innerHTML =
+      '<span class="mv">POST</span> ' + esc(BEACON) + '/flag-releases\n' +
+      '<span class="k">x-beacon-secret:</span> <span class="sec">••••••••••</span>\n' +
+      '<span class="k">content-type:</span> application/json\n\n' +
+      '{\n  <span class="k">"service"</span>: <span class="s">"' + esc(svc) + '"</span>,\n' +
+      '  <span class="k">"sha"</span>: <span class="s">"' + esc(sha) + '"</span>\n}';
+  }
+  $("service").addEventListener("change", function(){ renderReq(false); });
+  $("sha").addEventListener("input", function(){ computeShas($("sha").value || "unknown"); shaReset(); renderReq(false); });
+  computeShas($("sha").value || "a1b2c3d");
+  shaReset();
+  renderReq(false);
+  $("reqCard").classList.add("dim");
+
+  // ---- json syntax highlight ----
+  function hl(obj) {
+    var s = JSON.stringify(obj, null, 2);
+    return esc(s)
+      .replace(/"([^"]+)":/g, '<span class="jk">"$1"</span>:')
+      .replace(/: "([^"]*)"/g, ': <span class="js">"$1"</span>')
+      .replace(/: (\d+)/g, ': <span class="jn">$1</span>');
+  }
+
+  // ---- mock scenario responses (real Beacon shapes) ----
+  function buildResponse(scenario, svc, sha) {
+    var base = { service: svc, environment: "production", sha: SHA.deployed, previousSha: "9f8e7d6", previousShaSource: "state-store" };
+    if (scenario === "unknown") return { status: 400, body: { error: "unknown service '" + svc + "'" } };
+    if (scenario === "noop") return { status: 200, body: Object.assign({}, base, { discovered: 0, outcomes: [] }) };
+    if (scenario === "waiting") return { status: 200, body: Object.assign({}, base, { discovered: 1, outcomes: [
+      { flag: "new-checkout-flow", scope: "fullstack", action: "waiting", detail: "other service not deployed yet" } ]}) };
+    // released / reverted share the trigger response; monitor differs
+    return { status: 200, body: Object.assign({}, base, { discovered: 1, outcomes: [
+      { flag: "new-checkout-flow", scope: "backend", action: "released",
+        detail: { method: "guarded", releaseId: "rel_7c21f", metricKeys: ["http-latency-checkout"] } } ]}) };
+  }
+
+  var pillClass = { released:"released", waiting:"waiting", reverted:"reverted", error:"error",
+                    noop:"noop", already_running:"already_running", completed:"completed" };
+
+  function renderOutcomes(body) {
+    var chips = $("chips");
+    if (!body.outcomes || !body.outcomes.length) {
+      chips.innerHTML = '<div class="empty">' +
+        (body.error ? '⛔ ' + esc(body.error) : 'discovered 0 — no new release-flag manifest in this SHA.') +
+        '</div>';
+      return;
+    }
+    chips.innerHTML = body.outcomes.map(function (o) {
+      return '<div class="chip"><span class="fk">' + esc(o.flag) + '</span>' +
+        '<span class="scope">scope: ' + esc(o.scope) + '</span>' +
+        '<span class="pill ' + (pillClass[o.action]||'noop') + '">' + esc(o.action) + '</span></div>';
+    }).join("");
+  }
+
+  // ---- step-driven pipeline (advance on click / key) ----
+  var ALL_STAGES = ["p1a","p1b","p1c","p1d","d1","d2","b1","b2","b3","b4"];
+  function setStage(id, state) { $(id).setAttribute("data-state", state); }
+  function resetStages() { ALL_STAGES.forEach(function(s){ setStage(s,"idle"); }); }
+  function monLog(html, cls){ var d=document.createElement("div"); if(cls)d.className=cls; d.innerHTML=html; $("monLog").appendChild(d); }
+
+  var steps = [];       // full step list (not consumed — enables replay/back)
+  var idx = -1;         // index of the last-executed step
+  var running = false;
+  var done = false;
+
+  function armButton(label) {
+    var btn = $("goBtn"); btn.classList.add("next"); btn.disabled = false;
+    var ic = $("goIcon"); if (ic) ic.outerHTML = '<span id="goIcon">→</span>';
+    $("goText").innerHTML = label + ' &nbsp;<kbd>Space</kbd>';
+    $("stepHint").style.display = "block";
+    $("stepHint").innerHTML = (idx >= 0)
+      ? '<b>Space</b> / <b>→</b> next · <b>←</b> back'
+      : '<b>click</b>, <b>Space</b>, <b>Enter</b> or <b>→</b> to advance';
+  }
+  function markDone() {
+    done = true;
+    var btn = $("goBtn"); btn.classList.remove("next"); btn.disabled = false;
+    var ic = $("goIcon"); if (ic) ic.outerHTML = '<span id="goIcon">↺</span>';
+    $("goText").textContent = "Restart";
+    $("stepHint").style.display = "block";
+    $("stepHint").innerHTML = '<b>←</b> back · <b>Space</b> restart';
+  }
+  function idleBtn() {
+    var btn = $("goBtn"); btn.classList.remove("next"); btn.disabled = false;
+    var ic = $("goIcon"); if (ic) ic.outerHTML = '<span id="goIcon">▸</span>';
+    $("goText").textContent = "Start walkthrough — open PR";
+    $("stepHint").style.display = "none";
+  }
+
+  function showResponse(result) {
+    renderOutcomes(result.body);
+    var r = $("resp"); r.style.display = "block";
+    r.innerHTML = '<span style="color:var(--muted)">HTTP ' + result.status + '</span>\n' + hl(result.body);
+  }
+
+  // request-card reveal control
+  function reqCard(mode) {
+    var c = $("reqCard");
+    c.classList.remove("dim","live");
+    if (mode === "dim") c.classList.add("dim");
+    else if (mode === "live") c.classList.add("live");
+  }
+
+  // Build the full step queue for a scenario. Each entry: {label, run}.
+  // label = what the NEXT click will do (shown on the button before it runs).
+  function buildSteps(scenario, svc, sha) {
+    var result = buildResponse(scenario, svc, sha);
+    var q = [];
+
+    // ---- Phase 1 · CI (always runs; sets up the flag + manifest) ----
+    q.push({ label: "Analyse risk", run: function () {
+      setStage("p1a","active"); setStage("p1a","done"); setStage("p1b","next");
+    }});
+    q.push({ label: "Create flag (dark)", run: function () {
+      setStage("p1b","active"); setStage("p1b","done"); setStage("p1c","next");
+    }});
+    q.push({ label: "Wrap code + write manifest", run: function () {
+      setStage("p1c","active"); setStage("p1c","done"); setStage("p1d","next");
+    }});
+    q.push({ label: "Deploy the merged code", run: function () {
+      // stage 04 done: agents committed flag wiring + manifest → the SHA changes.
+      setStage("p1d","active"); setStage("p1d","done"); setStage("d1","next");
+      shaAgent();
+    }});
+
+    // ---- Deploy ----
+    q.push({ label: "Fire deploy webhook", run: function () {
+      // merge + deploy: the SHA that actually ships (≠ developer's original).
+      setStage("d1","active"); setStage("d1","done"); setStage("d2","next");
+      shaDeployed();
+    }});
+    q.push({ label: "Notify Beacon", run: function () {
+      // the webhook → Beacon moment: reveal the HTTP request (carries the deployed SHA)
+      setStage("d2","active"); setStage("d2","done");
+      reqCard("live"); renderReq(true);
+      setStage("b1","next");
+    }});
+
+    // ---- Phase 2 · Beacon ----
+    q.push({ label: "Discover release flags", run: function () {
+      setStage("b1","active");
+      if (result.status === 400) {
+        setStage("b1","fail");
+        ["b2","b3","b4"].forEach(function(s){ setStage(s,"skip"); });
+        showResponse(result);
+        return "end";
+      }
+      setStage("b1","done"); setStage("b2","next");
+    }});
+    q.push({ label: "Trigger release", run: function () {
+      setStage("b2","active"); setStage("b2","done");
+      reqCard("dim"); // request delivered; fade it back out
+      if (scenario === "noop") {
+        setStage("b3","skip"); setStage("b4","skip");
+        showResponse(result);
+        return "end";
+      }
+      setStage("b3","next");
+    }});
+    q.push({ label: (scenario === "waiting" ? "See outcome" : "Start monitoring"), run: function () {
+      setStage("b3","active"); setStage("b3","done");
+      showResponse(result);
+      if (scenario === "waiting") { setStage("b4","skip"); return "end"; }
+      setStage("b4","next");
+      $("monPanel").style.display = "block";
+      $("monLog").innerHTML = ""; $("track").classList.remove("reverting");
+      $("fill").style.right = "100%"; $("fill").textContent = "0%";
+      $("mState").querySelector(".val").textContent = "queued";
+      $("mState").querySelector(".val").style.color = "var(--muted)";
+    }});
+
+    // ---- Monitor — one advance per rollout stage ----
+    var stageList = (scenario === "reverted") ? [20, 50] : [20, 50, 100];
+    var latVals = { 20:62, 50:70, 100:78 }, errVals = { 20:0.4, 50:0.6, 100:0.7 };
+    stageList.forEach(function (pct, idx) {
+      var isLast = idx === stageList.length - 1;
+      q.push({ label: "Advance rollout → " + pct + "%",
+        run: function () {
+          setStage("b4","active");
+          var st = $("mState").querySelector(".val");
+          st.textContent = "monitoring"; st.style.color = "var(--warn)";
+          if (scenario === "reverted" && isLast) {
+            // regression at the 50% stage → auto-rollback
+            $("track").classList.add("reverting");
+            $("fill").style.right = "50%"; $("fill").textContent = "reverted";
+            $("mLatency").className = "metric bad"; $("mLatency").querySelector(".val").textContent = "812 ms";
+            $("mErr").className = "metric bad"; $("mErr").querySelector(".val").textContent = "23 %";
+            st.textContent = "reverted"; st.style.color = "var(--crit)";
+            monLog('guardrail <b>http-latency-checkout</b> regressed vs control', "rev");
+            monLog('LaunchDarkly auto-rolled back → flag serving <b>control</b>', "rev");
+            setStage("b4","fail");
+            return "end";
+          }
+          $("fill").style.right = (100 - pct) + "%"; $("fill").textContent = pct + "%";
+          $("mLatency").querySelector(".val").textContent = latVals[pct] + " ms";
+          $("mErr").querySelector(".val").textContent = errVals[pct] + " %";
+          if (pct === 100) {
+            st.textContent = "completed"; st.style.color = "var(--good)";
+            monLog('rolled out to <b>100%</b> — release <b>completed</b>', "rel");
+            $("fill").textContent = "100% ✓";
+            setStage("b4","done");
+            return "end";
+          }
+          monLog('advanced to <b>' + pct + '%</b> · metrics healthy');
+        }});
+    });
+
+    return q;
+  }
+
+  // reset all visual state to "PR opened, nothing run yet"
+  function fullResetVisuals() {
+    resetStages(); $("resp").style.display = "none"; $("monPanel").style.display = "none";
+    $("chips").innerHTML = '<div class="empty">Pull request opened — step through the pipeline.</div>';
+    ["mLatency","mErr"].forEach(function(id){ $(id).className = "metric ok"; });
+    $("mLatency").querySelector(".val").textContent = "— ms";
+    $("mErr").querySelector(".val").textContent = "— %";
+    reqCard("dim"); shaReset(); renderReq(false);
+  }
+
+  // Deterministically rebuild the DOM to the state after step `target`.
+  // target = -1 means "armed, before the first step".
+  function replayTo(target) {
+    fullResetVisuals();
+    done = false;
+    if (target < 0) {
+      idx = -1; setStage("p1a","next"); armButton(steps[0].label); return;
+    }
+    var res;
+    for (var i = 0; i <= target; i++) { res = steps[i].run(); }
+    idx = target;
+    if (res === "end" || target >= steps.length - 1) markDone();
+    else armButton(steps[target + 1].label);
+  }
+
+  function nextStep() {
+    if (done || idx >= steps.length - 1) { markDone(); return; }
+    idx++;
+    var res = steps[idx].run();
+    if (res === "end" || idx >= steps.length - 1) { markDone(); return; }
+    armButton(steps[idx + 1].label);
+  }
+
+  function back() {
+    if (!running || idx < 0) return;
+    replayTo(idx - 1);
+  }
+
+  function begin() {
+    var scenario = $("scenario").value, svc = $("service").value, sha = $("sha").value || "unknown";
+    computeShas(sha);
+    fullResetVisuals();
+    steps = buildSteps(scenario, svc, sha);
+    running = true; done = false; idx = -1;
+    setStage("p1a","next");
+    armButton(steps[0].label);
+  }
+
+  function forward() {
+    if (!running || done) { begin(); return; }  // first press starts; at end, restarts
+    nextStep();
+  }
+
+  $("goBtn").addEventListener("click", forward);
+  document.addEventListener("keydown", function (e) {
+    if (["INPUT","SELECT","TEXTAREA"].indexOf(document.activeElement.tagName) >= 0) return;
+    if (e.key === " " || e.key === "Enter" || e.key === "ArrowRight") {
+      e.preventDefault(); forward();
+    } else if (e.key === "ArrowLeft") {
+      e.preventDefault(); back();
+    }
+  });
+
+  idleBtn();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+# Drop this into your app repo at .github/workflows/auto-factory.yml when you want
+# Phase 1 to run on the CURSOR provider (Cursor agents via @cursor/sdk).
+#
+# Why this differs from the plain template: the Cursor provider lazy-loads
+# @cursor/sdk, which needs node_modules — a bare `uses: <owner>/...@main` action
+# ships no node_modules, so it can't run Cursor. This workflow instead checks the
+# tool out, `npm ci`s it, and runs the bundled action directly. The tool checkout
+# lives in tool/, OUTSIDE the analyzed code in app/, so the agents' `git add -A`
+# never sweeps the tool into your PR.
+#
+# The auto-factory-ai-provider flag must serve 'cursor' for this to use Cursor
+# (otherwise the same chain runs on whatever the flag serves). Anthropic/Vega users
+# should use the simpler auto-factory.yml instead.
+
+name: LaunchDarkly Auto-Factory (Cursor)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: write        # agents commit flag wiring, metrics, and tests to the PR branch
+  pull-requests: write   # post the summary comment
+  checks: write          # post the approval-gate status as a check run
+
+jobs:
+  auto-factory:
+    runs-on: ubuntu-latest
+    # CI-loop guard (secondary). The primary guard is in the action: agent commits
+    # carry [skip ci], so the agents' pushes never create a workflow run.
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      # The code under analysis = the PR's head branch (so agent commits push back cleanly).
+      - name: Check out the PR code
+        uses: actions/checkout@v4
+        with:
+          path: app
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0          # full history so git_diff can do base...HEAD
+
+      # The AutoFactory tool. Replace <owner> with the org/user hosting this repo.
+      - name: Check out the AutoFactory tool
+        uses: actions/checkout@v4
+        with:
+          repository: nvhoanganh/launchdarkly-auto-factory
+          ref: main
+          path: tool
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24        # @cursor/sdk requires Node >=22.13
+
+      - name: Install tool dependencies (provides @cursor/sdk)
+        run: npm ci
+        working-directory: tool
+
+      # Optional: knowledge-graph wrap points (see auto-factory.yml for details).
+      - name: Install ld-find-code-refs (knowledge-graph wrap points)
+        continue-on-error: true
+        run: |
+          curl -fsSL https://github.com/launchdarkly/ld-find-code-refs/releases/download/v2.14.0/ld-find-code-refs_2.14.0_linux_amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin ld-find-code-refs
+
+      - name: Run AutoFactory Phase 1 (Cursor)
+        working-directory: app    # cwd = your code; agent git ops happen here
+        run: node "$GITHUB_WORKSPACE/tool/packages/phase1-resource-factory/dist/action.bundle.js"
+        env:
+          LD_SDK_KEY:           ${{ secrets.LD_SDK_KEY }}
+          CURSOR_API_KEY:       ${{ secrets.CURSOR_API_KEY }}
+          LD_API_KEY:           ${{ secrets.LD_API_KEY }}
+          LD_APP_PROJECT_KEY:   ${{ vars.LD_APP_PROJECT_KEY }}   # e.g. autofactory-demo
+          GRAPH_KEY:            gha-auto-factory
+          ENABLE_FLAG_CREATION: "true"   # create real flags/metrics in the app project
+          ENABLE_CODE_CHANGES:  "true"   # commit wiring + tests to the PR branch
+          # Approvals: controlled by the auto-factory-approval-mode / -risk-threshold
+          # / -approval-gates flags in the factory project (APPROVAL_MODE env overrides).
+          SANDBOX_ROOT:         "."
+          PR_BRANCH:            ${{ github.event.pull_request.head.ref }}
+          PR_BASE_REF:          ${{ github.event.pull_request.base.ref }}
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          # Optional: token able to read PRIVATE repos registered under relatedRepos
+          # in .autofactory/services.yaml (cross-repo research).
+          AUTOFACTORY_REPOS_TOKEN: ${{ secrets.AUTOFACTORY_REPOS_TOKEN }}
