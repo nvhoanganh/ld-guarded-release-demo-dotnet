@@ -55,11 +55,6 @@ public class FraudScreeningFlagTests
         testData.Update(testData.Flag("enable-fraud-screening")
             .ValueForAll(LdValue.Of(fraudVariation)));
 
-        // Keep recommendations in control so they don't add extra latency that
-        // would interfere with fraud-path latency assertions.
-        testData.Update(testData.Flag("enable-checkout-recommendations")
-            .ValueForAll(LdValue.Of("control")));
-
         var testLdConfig = Configuration.Builder("sdk-test-fake-key")
             .DataSource(testData)
             .Events(Components.NoEvents)
@@ -192,5 +187,4 @@ file record CheckoutResponse(
     string Engine,
     string OrderId,
     long ProcessingMs,
-    decimal CartTotal,
-    string[]? Recommendations);
+    decimal CartTotal);

@@ -119,35 +119,16 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
         }
     }
 
-    // Evaluate recommendations flag; fail-safe default 'control' means no enrichment.
-    var recsVariation = ld.StringVariation("enable-checkout-recommendations", context, "control");
-
-    string[]? recommendations = null;
-    if (recsVariation == "v1")
-    {
-        try
-        {
-            recommendations = await EnrichCheckout(req.UserId);
-        }
-        catch (Exception ex)
-        {
-            log.LogError(ex, "EnrichCheckout failed for {UserId}", req.UserId);
-            ld.Track("enable-checkout-recommendations-error", context);
-        }
-    }
-
     sw.Stop();
 
     ld.Track("enable-fraud-screening-latency", context, LdValue.Null, sw.ElapsedMilliseconds);
     ld.Track("enable-fraud-screening-checkout-complete", context);
-    ld.Track("enable-checkout-recommendations-business", context);
     return Results.Ok(new
     {
         engine = "v1",
         orderId = Guid.NewGuid().ToString("N"),
         processingMs = sw.ElapsedMilliseconds,
-        cartTotal = req.CartTotal,
-        recommendations
+        cartTotal = req.CartTotal
     });
 });
 
@@ -156,14 +137,6 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
 static async Task ScreenForFraud(string userId, decimal cartTotal)
 {
     await Task.Delay(Random.Shared.Next(180, 260));
-}
-
-// Personalized add-on recommendations for the checkout page. Calls the
-// recommendations model, so it adds latency to every checkout request.
-static async Task<string[]> EnrichCheckout(string userId)
-{
-    await Task.Delay(Random.Shared.Next(220, 320));
-    return new[] { "extended-warranty", "gift-wrap", "express-shipping" };
 }
 
 app.Run();
