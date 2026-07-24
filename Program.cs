@@ -107,7 +107,22 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     // Fraud screening and personalized recommendations are now standard behavior
     // (flags enable-fraud-screening / enable-checkout-recommendations retired).
     await ScreenForFraud(req.UserId, req.CartTotal);
-    var recommendations = await EnrichCheckout(req.UserId, ld, context);
+    var recSw = Stopwatch.StartNew();
+    string[] recommendations;
+    try
+    {
+        recommendations = await EnrichCheckout(req.UserId, ld, context);
+        recSw.Stop();
+        ld.Track("enable-richer-recommendations-latency", context, null, recSw.ElapsedMilliseconds);
+        ld.Track("enable-richer-recommendations-checkout-success", context);
+    }
+    catch (Exception ex)
+    {
+        recSw.Stop();
+        log.LogError(ex, "EnrichCheckout failed for {UserId}", req.UserId);
+        ld.Track("enable-richer-recommendations-error", context);
+        recommendations = new[] { "extended-warranty", "gift-wrap", "express-shipping" };
+    }
 
     sw.Stop();
 
