@@ -284,42 +284,96 @@ piece for long-term use.
 
 ---
 
-## Finding 11 — Pairing AutoFactory with an AI cleanup agent (e.g. Vega) creates a re-flag loop
+## Finding 11 — AutoFactory + an AI cleanup agent (Vega): the loop was feared, but the classifier held (observed live)
 
-LaunchDarkly's **Vega** can clean flags up: it removes the flag code and opens a
-PR. But AutoFactory Phase 1 triggers on `pull_request` — so **a Vega cleanup PR
-fires Phase 1**, and Phase 1 may **re-flag the cleanup**, because removing a
-`StringVariation` and inlining a variation *looks like* a business-logic change to
-the classifier:
+We ran this end-to-end. LaunchDarkly **Vega** cleaned up the reverted
+`enable-checkout-recommendations` flag: it removed the flag evaluation and its
+`v1` branch and opened **PR #3** (`vega/flag-cleanup-…` → `software-factory`,
+labelled `vega-pr`). Because AutoFactory Phase 1 triggers on `pull_request`, that
+cleanup PR **did fire Phase 1** — the loop's first step happened for real.
+
+**But it did NOT re-flag.** The research-planner classified it correctly and
+short-circuited the whole chain:
 
 ```
-Vega removes flag X  →  PR  →  AutoFactory sees "business logic changed"
-                                    →  creates NEW flag Y around the inlined code
-                                    →  (Vega later cleans up Y)  →  loop
+research-planner: flag_worthy=false, flag_action=none,
+                  risk_score=0.15, skip_flagging=true
+Skipped: manifest-steward, flag-implementer, metrics-author,
+         flag-testing, code-reviewer
+Verdict: "no flag needed — nothing to review"
 ```
 
-Even when it doesn't create a flag, it **burns a Phase 1 run** (cost + PR noise) on
-every cleanup. The existing guards don't help: `if: github.actor !=
-'github-actions[bot]'` and the `[skip ci]` on agent commits only stop AutoFactory
-from re-triggering **itself** — a **Vega** PR is a different actor.
+So the feared infinite create/remove loop **did not materialize** — AutoFactory's
+own classifier recognized "this removes a flag" and declined to re-flag. Honest
+correction to our first hypothesis: *the factory was smart enough on its own.*
 
-This is more than sprawl (Finding 10) — it's an **active loop** between two
-autonomous agents: one removes flags, the other re-adds them.
+**What actually costs something:**
+1. **A wasted Phase 1 run** — the research-planner *ran* (compute + a PR comment)
+   before deciding to skip.
+2. **Reliance on the classifier being right on every cleanup diff.** This one was a
+   simple removal (risk 0.15). A cleanup that inlines a more complex path could look
+   like business logic and be misjudged — the skip was *incidental to a low risk
+   score*, not an explicit "this is a cleanup" decision.
 
-**Remediation — an explicit "don't re-flag a cleanup" contract (combine layers):**
-1. **Actor exclusion** — add the cleanup bot to the workflow `if:`
-   (`&& github.actor != '<vega-bot>'`).
-2. **Marker/label** — cleanup PRs carry a branch prefix / label / `[flag-cleanup]`
-   commit tag that AutoFactory skips.
-3. **Diff-shape classification (robust)** — teach the research-planner that a diff
-   which **removes an existing flag's evaluation** and inlines a variation is
-   flag-cleanup → `skip_flagging`, never create a new flag. This keys off the change,
-   not who opened the PR.
-4. **Identity-aware idempotency** — recognize the removed flag as its own
-   `auto-generated` flag and treat its removal as terminal, not new work.
+### Where the fix belongs — in the agent, not the CI YAML
 
-Any deployment running Phase 1 **and** an AI cleanup agent must wire this, or the
-two agents fight indefinitely.
+A first instinct was a workflow guard
+(`if: … && !startsWith(github.head_ref, 'vega/') && !contains(labels, 'vega-pr')`).
+**That is the wrong layer** and we reverted it. AutoFactory's whole premise is that
+decisions live in the **factory's control plane** (the LaunchDarkly AI configs), not
+hardcoded per-repo in workflow YAML. A YAML guard must be copied into every
+onboarded repo, hardcodes "vega", is invisible to the agents, and produces no
+explicit "skipped because cleanup" record.
+
+**Applied fix — an explicit cleanup gate in the research-planner** (a config-as-code
+edit to `autofactory-research-planner`, synced to LD via the bridge). Before risk
+scoring, the agent detects a cleanup PR from **`{{PR_TITLE}}`** (`[Vega]` / "remove"),
+**`{{PR_BRANCH}}`** (`vega/`, `*flag-cleanup*`), or a **diff that removes a flag
+evaluation**, and skips **explicitly**: `flag_worthy=false`, `flag_action=none`,
+`skip_flagging=true`, with a reason that *names* the cleanup. This is stronger than
+the incidental low-risk skip — it's a deliberate, auditable decision, editable in
+LaunchDarkly, that every repo's agent inherits with zero per-repo config.
+
+**Takeaway:** the loop is real as a *risk* but the factory's classifier already
+breaks it; the right hardening is to make that skip **explicit and cleanup-aware in
+the agent**, not to bolt a guard onto CI.
+
+---
+
+## Finding 12 — Cleanup conflates a *reverted* release with an *abandoned* feature (and pushed an unverified build)
+
+When Vega cleaned up `enable-checkout-recommendations`, it reasoned:
+> *"the release **rolled back**, so `control` is the winning/stable variation…
+> Cleanup = remove the flag eval and the dead `v1` branch, keep control."*
+
+So it **deleted the entire recommendations feature** (`EnrichCheckout`, the `v1`
+branch, the response field). Internally consistent — but semantically wrong: **a
+guarded release rolling back means "v1 regressed *this time*," which almost always
+means "fix it and re-release," not "abandon the feature."** A reverted flag and an
+abandoned flag look **identical** in state (serving `control`, no rollout), so the
+cleanup agent cannot tell them apart:
+
+| Flag state after revert | Two very different intents |
+|---|---|
+| serving `control`, no rollout | **abandon** v1 → delete the code (what Vega did) |
+| serving `control`, no rollout | **retry**: optimize v1, re-release (the likely real intent) |
+
+Treating "serving control" as "control won, delete v1" will **silently delete
+features teams meant to iterate on.**
+
+Compounding it: Vega hit a **build failure** (`NETSDK1045` — the project targets
+.NET 10, its environment only had the .NET 9 SDK), **dismissed it** as an
+environment limitation, and **committed + pushed anyway** — so it opened a cleanup
+PR containing code it **could not compile or verify**.
+
+**Remediation:**
+- **Only auto-clean on a *completed* release** (v1 rolled to 100%), where "delete
+  the loser" is unambiguous. On a **reverted** release, **hold for a human** — the
+  intent (abandon vs retry) is not encoded in the flag state.
+- Carry the intent explicitly: a flag tag or a `releaseIntent`-style field
+  (`abandon` / `retry-pending`) the cleanup agent must respect.
+- **Never push a cleanup that fails to build.** A build failure the agent can't
+  resolve should block the PR, not be dismissed as "environmental."
 
 ---
 
@@ -382,7 +436,8 @@ shared-path metrics. The in-flight "zero samples = broken, not healthy" check
 | 8 | Randomization unit silently defaulted to `user` | Make it an owned decision: agent proposes with reasoning → human confirms in `releaseIntent`; derive from the guardrail's level; never silently default |
 | 9 | "Reuse" loses to "unit must match" → re-authors | Agent adopts the reused metric's unit; and/or shape shared metrics as **dual-unit** so any rollout can reuse them |
 | 10 | Flag cleanup out of scope — code + flag debt piles up | A real Phase 3: on a terminal release, an agent opens a cleanup PR (inline winner / delete loser, remove flag) guided by code-refs |
-| 11 | AutoFactory + AI cleanup agent (Vega) → re-flag loop | Explicit "don't re-flag a cleanup" contract: actor exclusion + label + diff-shape classification (`skip_flagging` when a flag eval is removed) |
+| 11 | Cleanup PR triggers Phase 1 (loop feared) — but the classifier correctly skipped | Observed live: no re-flag. Make the skip **explicit + cleanup-aware in the research-planner** (title/branch/diff-shape), not a per-repo CI YAML guard — the decision belongs in the factory's control plane |
+| 12 | Cleanup conflates a *reverted* release with an *abandoned* feature; pushed an unverified build | Auto-clean only on a *completed* release; **hold on revert**; carry abandon-vs-retry intent explicitly; never push a cleanup that fails to build |
 
 **The one-line takeaway for a design partner:** the orchestration is real and it
 works — and the **improvement loop is real too** (we fixed an agent as config and
