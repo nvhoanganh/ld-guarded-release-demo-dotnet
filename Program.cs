@@ -137,10 +137,10 @@ static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context c
         var variation = ld.StringVariation("enable-richer-recommendations", context, "control");
         if (variation == "v1")
         {
-            // Intentionally ~10ms higher median than control (230–330ms vs 220–320ms) with
-            // a tighter range. The overlap is deliberate: this is the demo trigger for
-            // guarded-rollback testing — a small regression that automated analysis detects.
-            await Task.Delay(Random.Shared.Next(230, 330));
+            // Micro-regression: v1 is essentially identical to control (220–322 vs
+            // 220–320) — only ~+1ms on average. Tests how small a real regression the
+            // guarded rollback will still detect at scale.
+            await Task.Delay(Random.Shared.Next(220, 322));
             return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
         }
         // control: preserve existing behavior
