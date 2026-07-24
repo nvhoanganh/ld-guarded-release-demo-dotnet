@@ -132,8 +132,8 @@ static async Task ScreenForFraud(string userId, decimal cartTotal)
 // recommendations model, so it adds latency to every checkout request.
 static async Task<string[]> EnrichCheckout(string userId)
 {
-    await Task.Delay(Random.Shared.Next(220, 320));
-    return new[] { "extended-warranty", "gift-wrap", "express-shipping" };
+    await Task.Delay(Random.Shared.Next(200, 400));
+    return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
 }
 
 app.Run();
