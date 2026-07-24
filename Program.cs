@@ -135,7 +135,7 @@ static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context c
     var variation = ld.StringVariation("enable-richer-recommendations", context, "control");
     if (variation == "v1")
     {
-        await Task.Delay(Random.Shared.Next(200, 400));
+        await Task.Delay(Random.Shared.Next(230, 330));
         return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
     }
     // control: preserve existing behavior

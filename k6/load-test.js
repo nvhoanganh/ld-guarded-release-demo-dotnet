@@ -10,16 +10,13 @@ const engineV1Errors = new Rate('engine_v1_errors');
 
 export const options = {
   stages: [
-    { duration: '30s', target: 10 },   // warm up — baseline (flag off / 0% rollout)
-    { duration: '60s', target: 50 },   // ramp — start your Guarded Release in LD now
-    { duration: '180s', target: 50 },  // sustain — watch LD auto-rollback fire
-    { duration: '30s', target: 0 },    // cool down
+    { duration: '30s', target: 10 },    // ramp to a gentle 10 VUs
+    { duration: '20m', target: 10 },    // sustain 20 min — covers both guarded stages + margin
+    { duration: '30s', target: 0 },     // cool down
   ],
+  // Informational only (don't abort the run) — checkout is intentionally slow.
   thresholds: {
-    // Informational — these will trip when the new engine is serving traffic,
-    // which is the whole point of the demo.
-    http_req_failed: ['rate<0.05'],
-    http_req_duration: ['p(95)<200'],
+    http_req_failed: ['rate<0.50'],
   },
 };
 
