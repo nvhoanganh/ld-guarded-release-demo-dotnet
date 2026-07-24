@@ -107,7 +107,7 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     // Fraud screening and personalized recommendations are now standard behavior
     // (flags enable-fraud-screening / enable-checkout-recommendations retired).
     await ScreenForFraud(req.UserId, req.CartTotal);
-    var recommendations = await EnrichCheckout(req.UserId);
+    var recommendations = await EnrichCheckout(req.UserId, ld, context);
 
     sw.Stop();
 
@@ -130,10 +130,17 @@ static async Task ScreenForFraud(string userId, decimal cartTotal)
 
 // Personalized add-on recommendations for the checkout page. Calls the
 // recommendations model, so it adds latency to every checkout request.
-static async Task<string[]> EnrichCheckout(string userId)
+static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context context)
 {
-    await Task.Delay(Random.Shared.Next(200, 400));
-    return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
+    var variation = ld.StringVariation("enable-richer-recommendations", context, "control");
+    if (variation == "v1")
+    {
+        await Task.Delay(Random.Shared.Next(200, 400));
+        return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
+    }
+    // control: preserve existing behavior
+    await Task.Delay(Random.Shared.Next(220, 320));
+    return new[] { "extended-warranty", "gift-wrap", "express-shipping" };
 }
 
 app.Run();
