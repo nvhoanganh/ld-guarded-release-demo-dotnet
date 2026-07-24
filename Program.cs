@@ -104,43 +104,13 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     // Old checkout: fast, stable.
     await Task.Delay(Random.Shared.Next(50, 100));
 
-    // Evaluate fraud-screening flag; fail-safe default 'control' means no fraud check.
-    var fraudVariation = ld.StringVariation("enable-fraud-screening", context, "control");
-    if (fraudVariation == "v1")
-    {
-        try
-        {
-            await ScreenForFraud(req.UserId, req.CartTotal);
-        }
-        catch (Exception ex)
-        {
-            log.LogError(ex, "ScreenForFraud failed for {UserId}", req.UserId);
-            ld.Track("enable-fraud-screening-error", context);
-        }
-    }
-
-    // Evaluate recommendations flag; fail-safe default 'control' means no enrichment.
-    var recsVariation = ld.StringVariation("enable-checkout-recommendations", context, "control");
-
-    string[]? recommendations = null;
-    if (recsVariation == "v1")
-    {
-        try
-        {
-            recommendations = await EnrichCheckout(req.UserId);
-        }
-        catch (Exception ex)
-        {
-            log.LogError(ex, "EnrichCheckout failed for {UserId}", req.UserId);
-            ld.Track("enable-checkout-recommendations-error", context);
-        }
-    }
+    // Fraud screening and personalized recommendations are now standard behavior
+    // (flags enable-fraud-screening / enable-checkout-recommendations retired).
+    await ScreenForFraud(req.UserId, req.CartTotal);
+    var recommendations = await EnrichCheckout(req.UserId);
 
     sw.Stop();
 
-    ld.Track("enable-fraud-screening-latency", context, LdValue.Null, sw.ElapsedMilliseconds);
-    ld.Track("enable-fraud-screening-checkout-complete", context);
-    ld.Track("enable-checkout-recommendations-business", context);
     return Results.Ok(new
     {
         engine = "v1",
@@ -169,6 +139,3 @@ static async Task<string[]> EnrichCheckout(string userId)
 app.Run();
 
 public record CheckoutRequest(string UserId, decimal CartTotal);
-
-// Required so WebApplicationFactory<Program> can reference this type from the test project.
-public partial class Program { }
