@@ -182,6 +182,147 @@ as non-blocking for the already-produced artifacts.
 
 ---
 
+## Finding 8 — The randomization unit is silently defaulted, but it's a real design decision
+
+When the metrics-author runs, it reads the rollout's randomization unit from the
+manifest and, if it's unset, applies rule **M03**: *"else default `user` and note
+the assumption."* In our second run the manifest had no unit set, so it fell
+through to **`user`** — with only a one-line "assumption noted" that no human
+reads before the release ships.
+
+The unit is **not** a safe default. It depends on factors an agent can't infer
+from a diff — and often a human can't either without context:
+
+| Factor | Pulls toward `user` | Pulls toward `request` |
+|---|---|---|
+| Stickiness — must one user always see the same variation? | Yes (UX consistency) | No (stateless call) |
+| What the harm/metric measures | user-level (conversion, revenue) | request-level (latency, error rate) |
+| Statistical power | fewer units, slower detection | more units, faster detection |
+| Independence | requests from one user are correlated | fine when the effect is per-request |
+
+For our backend latency change on a stateless endpoint, **`request` was the
+better unit** (per-request harm, no stickiness need, more samples). The app even
+already models a `request` context. But the agent defaulted to `user`.
+
+Compounding this: the app builds a **multi-context** (`user` + `request`), where
+the `request` kind is keyed by an **ephemeral per-call `TraceIdentifier`**. Nothing
+*links* the request to the user — they're two independent context kinds that merely
+co-occur. So the multi-context doesn't resolve the unit choice for the agent; a
+human still has to decide which kind the release randomizes on, and whether
+stickiness matters.
+
+**Remediation (design, not a one-line default flip):** the unit should be an
+**owned** decision, not a silent fallback. Best options, combined:
+1. **Human-owned in `releaseIntent`** — the agent *proposes* a unit **with its
+   reasoning**, the approver confirms/overrides at the gate.
+2. **Derive it from the primary guardrail's level** — per-request metric → `request`;
+   per-user metric → `user`.
+3. **Never silently default** — if unset and the agent can't justify a choice with
+   high confidence, **HOLD** for a human. Flipping the default to `request` would be
+   the same mistake in the other direction.
+
+---
+
+## Finding 9 — "Reuse existing metric" loses to "unit must match", so the agent re-authors
+
+After the Finding 2/3 fix, the retrained metrics-author *did* try to reuse an
+existing metric — but for latency it still **created a new `track()` metric**
+instead of reusing `http-latency-checkout`, even though the research-planner's
+brief explicitly said *"the Metrics Author should reuse it."*
+
+Cause: a **rule conflict**. The agent chose `randomizationUnit: user` (Finding 8's
+default), and `http-latency-checkout` was **`request`-scoped**. Its mandatory
+unit-match rule (M03) then **rejected** the reuse (request ≠ user) → so it fell
+back to authoring a new user-scoped metric.
+
+```
+reuse http-latency-checkout   (planner + guidance)     ← wanted
+        ✗ blocked by
+randomizationUnit = user  +  http-latency-checkout = request  +  M03
+        ↓
+new user-scoped metric created instead
+```
+
+**Two remediations (both work; combine them):**
+- **Agent side:** when a suitable existing shared-path metric exists, **adopt its
+  randomization unit** for the rollout rather than defaulting the unit first and
+  then rejecting the metric.
+- **Metric side:** shape shared observability metrics as **dual-unit**. Because the
+  `http.latency;route=/api/checkout` event carries **both** `user` and `request`
+  keys, `http-latency-checkout` can be defined with **both** analysis units — making
+  it reusable by *any* rollout unit. (We verified this in the LD UI: enabling both
+  units keeps the metric "Healthy".) A dual-unit shared metric removes the conflict
+  entirely — the agent just reuses it.
+
+---
+
+## Finding 10 — Flag cleanup (Phase 3) is out of scope: code *and* flag debt accumulates
+
+AutoFactory covers Phase 1 (create + wrap) and Phase 2 (release), but **Phase 3
+(flag cleanup) is explicitly out of scope** — "existing LaunchDarkly
+functionality." Nothing in the pipeline ever removes a flag or its code.
+
+Every flagged PR leaves scaffolding behind **permanently** until a human removes
+it: a flag evaluation (`ld.StringVariation(...)`), an `if (variation == "v1") { … }`
+branch plus the implicit `control` path, the `ld.Track(...)` calls, and the flag
+itself in LaunchDarkly. Two PRs into this demo, the checkout handler already stacks
+**two** flag blocks (`enable-fraud-screening`, `enable-checkout-recommendations`),
+both currently dead (both releases rolled back) but still present. N PRs → N blocks.
+
+There is **no trigger, no agent, no sweep.** The factory helps a *human-driven*
+cleanup by marking flags `temporary: true`, tagging them `auto-factory` /
+`auto-generated`, and recording an `ld-find-code-refs` artifact — breadcrumbs, not
+removal. Cleanup happens only when a person (or your existing LD lifecycle process)
+inlines the winner / deletes the loser's branch, removes the eval, and archives the
+flag (guided by Code references).
+
+**Remediation:** a real Phase 3 — the mirror of Phase 1. Once a release reaches a
+terminal state, an agent opens a **cleanup PR**: inline the winning variation or
+delete the reverted one's branch, remove the flag evaluation and now-dead helper,
+and archive the flag, all guided by code-refs. This is the single biggest missing
+piece for long-term use.
+
+---
+
+## Finding 11 — Pairing AutoFactory with an AI cleanup agent (e.g. Vega) creates a re-flag loop
+
+LaunchDarkly's **Vega** can clean flags up: it removes the flag code and opens a
+PR. But AutoFactory Phase 1 triggers on `pull_request` — so **a Vega cleanup PR
+fires Phase 1**, and Phase 1 may **re-flag the cleanup**, because removing a
+`StringVariation` and inlining a variation *looks like* a business-logic change to
+the classifier:
+
+```
+Vega removes flag X  →  PR  →  AutoFactory sees "business logic changed"
+                                    →  creates NEW flag Y around the inlined code
+                                    →  (Vega later cleans up Y)  →  loop
+```
+
+Even when it doesn't create a flag, it **burns a Phase 1 run** (cost + PR noise) on
+every cleanup. The existing guards don't help: `if: github.actor !=
+'github-actions[bot]'` and the `[skip ci]` on agent commits only stop AutoFactory
+from re-triggering **itself** — a **Vega** PR is a different actor.
+
+This is more than sprawl (Finding 10) — it's an **active loop** between two
+autonomous agents: one removes flags, the other re-adds them.
+
+**Remediation — an explicit "don't re-flag a cleanup" contract (combine layers):**
+1. **Actor exclusion** — add the cleanup bot to the workflow `if:`
+   (`&& github.actor != '<vega-bot>'`).
+2. **Marker/label** — cleanup PRs carry a branch prefix / label / `[flag-cleanup]`
+   commit tag that AutoFactory skips.
+3. **Diff-shape classification (robust)** — teach the research-planner that a diff
+   which **removes an existing flag's evaluation** and inlines a variation is
+   flag-cleanup → `skip_flagging`, never create a new flag. This keys off the change,
+   not who opened the PR.
+4. **Identity-aware idempotency** — recognize the removed flag as its own
+   `auto-generated` flag and treat its removal as terminal, not new work.
+
+Any deployment running Phase 1 **and** an AI cleanup agent must wire this, or the
+two agents fight indefinitely.
+
+---
+
 ## Can a runtime metric check even work if the metric is on the dark path?
 
 A fair objection: if a metric only fires on the new (dark) code, you can't verify
@@ -216,6 +357,14 @@ shared-path metrics. The in-flight "zero samples = broken, not healthy" check
 - The agents **disclosed their assumptions** (e.g. the flag-implementer's commit
   noted "clients should tolerate a null/missing field"), giving the human gate
   real signal to review.
+- **The improvement loop works.** After editing the metrics-author's instructions
+  (config-as-code, no product-code change) to fix the blind-metric problem, the
+  **next PR's agent authored a working guardrail on its own** — a `track()`-based
+  latency metric on the shared path — and the guarded release **auto-rolled-back on
+  the agent-authored metric** (v1 292 ms vs control 72 ms, +219 ms). Found a gap →
+  taught the agent as config → verified on the next run. (That same run surfaced
+  Finding 9 — the reuse-vs-unit-match conflict — which is the loop working: each
+  pass reveals the next refinement.)
 
 ---
 
@@ -230,10 +379,17 @@ shared-path metrics. The in-flight "zero samples = broken, not healthy" check
 | 5 | Manifest hand-edited as raw JSON | Assisted, schema-validated authoring for the release plan — no hand-editing |
 | 6 | "No data" looks like "no regression" | In-flight: zero samples in an arm → warn/hold, don't complete |
 | 7 | Test node hangs on .NET → red run | Sandbox/timeout the shell; test-node failure non-blocking for produced artifacts |
+| 8 | Randomization unit silently defaulted to `user` | Make it an owned decision: agent proposes with reasoning → human confirms in `releaseIntent`; derive from the guardrail's level; never silently default |
+| 9 | "Reuse" loses to "unit must match" → re-authors | Agent adopts the reused metric's unit; and/or shape shared metrics as **dual-unit** so any rollout can reuse them |
+| 10 | Flag cleanup out of scope — code + flag debt piles up | A real Phase 3: on a terminal release, an agent opens a cleanup PR (inline winner / delete loser, remove flag) guided by code-refs |
+| 11 | AutoFactory + AI cleanup agent (Vega) → re-flag loop | Explicit "don't re-flag a cleanup" contract: actor exclusion + label + diff-shape classification (`skip_flagging` when a flag eval is removed) |
 
 **The one-line takeaway for a design partner:** the orchestration is real and it
-works, but *guarded-release safety depends entirely on metric quality* — and the
-current agent + review layer can produce a confident-looking release whose
-guardrail is blind. Hardening metric selection, adding a data-flow check, and
-replacing hand-edited manifest JSON with assisted authoring are the highest-value
-next steps.
+works — and the **improvement loop is real too** (we fixed an agent as config and
+verified it on the next PR). But *guarded-release safety depends entirely on metric
+quality*, several consequential decisions are **silently defaulted** rather than
+owned (metric choice, randomization unit), and the lifecycle is **half-closed** —
+there is no cleanup, and pairing with an AI cleanup agent risks a create/remove
+loop. Highest-value next steps: harden metric selection + add a data-flow check,
+make the randomization-unit and manifest decisions human-owned/assisted, and build
+Phase 3 cleanup with an explicit anti-loop contract.
