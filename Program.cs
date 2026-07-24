@@ -18,7 +18,14 @@ if (sdkKey == "YOUR_SDK_KEY_HERE")
 // Build the LdClient with the Observability plugin attached.
 // The plugin registers OTel instrumentation into builder.Services, so it must
 // be constructed BEFORE builder.Build().
+// In the "Test" ASPNETCORE_ENVIRONMENT, skip the 5-second LD initialization wait so
+// integration tests start quickly against a TestData-backed client.
+var ldStartWait = builder.Environment.EnvironmentName == "Test"
+    ? TimeSpan.Zero
+    : TimeSpan.FromSeconds(5);
+
 var ldConfig = Configuration.Builder(sdkKey)
+    .StartWaitTime(ldStartWait)
     .Plugins(new PluginConfigurationBuilder()
         .Add(ObservabilityPlugin.Builder(builder.Services)
             .WithServiceName("guarded-release-demo")
@@ -131,7 +138,7 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
 
     sw.Stop();
 
-    ld.Track("enable-fraud-screening-latency", context, null, sw.ElapsedMilliseconds);
+    ld.Track("enable-fraud-screening-latency", context, LdValue.Null, sw.ElapsedMilliseconds);
     ld.Track("enable-fraud-screening-checkout-complete", context);
     ld.Track("enable-checkout-recommendations-business", context);
     return Results.Ok(new
@@ -162,3 +169,6 @@ static async Task<string[]> EnrichCheckout(string userId)
 app.Run();
 
 public record CheckoutRequest(string UserId, decimal CartTotal);
+
+// Required so WebApplicationFactory<Program> can reference this type from the test project.
+public partial class Program { }
