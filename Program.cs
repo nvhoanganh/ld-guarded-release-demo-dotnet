@@ -97,8 +97,20 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     // Old checkout: fast, stable.
     await Task.Delay(Random.Shared.Next(50, 100));
 
-    // Screen the order for fraud before completing checkout.
-    await ScreenForFraud(req.UserId, req.CartTotal);
+    // Evaluate fraud-screening flag; fail-safe default 'control' means no fraud check.
+    var fraudVariation = ld.StringVariation("enable-fraud-screening", context, "control");
+    if (fraudVariation == "v1")
+    {
+        try
+        {
+            await ScreenForFraud(req.UserId, req.CartTotal);
+        }
+        catch (Exception ex)
+        {
+            log.LogError(ex, "ScreenForFraud failed for {UserId}", req.UserId);
+            ld.Track("enable-fraud-screening-error", context);
+        }
+    }
 
     // Evaluate recommendations flag; fail-safe default 'control' means no enrichment.
     var recsVariation = ld.StringVariation("enable-checkout-recommendations", context, "control");
