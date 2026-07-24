@@ -97,8 +97,14 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
     // Old checkout: fast, stable.
     await Task.Delay(Random.Shared.Next(50, 100));
 
-    // Enrich the order with personalized add-on recommendations before returning.
-    var recommendations = await EnrichCheckout(req.UserId);
+    // Evaluate recommendations flag; fail-safe default 'control' means no enrichment.
+    var recsVariation = ld.StringVariation("enable-checkout-recommendations", context, "control");
+
+    string[]? recommendations = null;
+    if (recsVariation == "v1")
+    {
+        recommendations = await EnrichCheckout(req.UserId);
+    }
 
     sw.Stop();
 
