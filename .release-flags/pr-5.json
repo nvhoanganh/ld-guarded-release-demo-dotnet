@@ -3,7 +3,14 @@
   "flagKey": "enable-richer-recommendations",
   "scope": "backend",
   "targetVariation": "v1",
-  "releasePlan": {},
+  "releasePlan": {
+    "metricKeys": [
+      "enable-richer-recommendations-latency",
+      "enable-richer-recommendations-error"
+    ],
+    "randomizationUnit": "user",
+    "notes": "Latency (pause): trace-backed on POST /api/checkout span. Error (killswitch): event-backed via track in EnrichCheckout. Randomization unit defaulted to user."
+  },
   "releaseIntent": {
     "_instructions": "Human approver: edit freely. action: auto (release on deploy) | hold (do not release yet) | manual (a human runs the release). Structured fields execute; anything else goes in notes (an agent will structure it on the PR for your review). Blank fields = default auto-release on deploy. prerequisites: [{\"flagKey\": \"flag-xyz\", \"variation\": \"on\"}]. notBefore: YYYY-MM-DD. reference: ticket/doc URL.",
     "action": "auto",
