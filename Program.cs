@@ -132,17 +132,31 @@ static async Task ScreenForFraud(string userId, decimal cartTotal)
 // recommendations model, so it adds latency to every checkout request.
 static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context context)
 {
-    var variation = ld.StringVariation("enable-richer-recommendations", context, "control");
-    if (variation == "v1")
+    try
     {
-        await Task.Delay(Random.Shared.Next(200, 400));
-        return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
+        var variation = ld.StringVariation("enable-richer-recommendations", context, "control");
+        if (variation == "v1")
+        {
+            // Intentionally ~10ms higher median than control (230–330ms vs 220–320ms) with
+            // a tighter range. The overlap is deliberate: this is the demo trigger for
+            // guarded-rollback testing — a small regression that automated analysis detects.
+            await Task.Delay(Random.Shared.Next(230, 330));
+            return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
+        }
+        // control: preserve existing behavior
+        await Task.Delay(Random.Shared.Next(220, 320));
+        return new[] { "extended-warranty", "gift-wrap", "express-shipping" };
     }
-    // control: preserve existing behavior
-    await Task.Delay(Random.Shared.Next(220, 320));
-    return new[] { "extended-warranty", "gift-wrap", "express-shipping" };
+    catch
+    {
+        try { ld.Track("enable-richer-recommendations-error", context); } catch { }
+        throw;
+    }
 }
 
 app.Run();
 
 public record CheckoutRequest(string UserId, decimal CartTotal);
+
+// Required so WebApplicationFactory<Program> can reference this type from the test assembly.
+public partial class Program { }
