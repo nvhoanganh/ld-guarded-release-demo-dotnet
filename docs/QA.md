@@ -170,6 +170,55 @@ discovery change, or one manifest directory per package. Neither exists in the
 prototype. Raise your repository topology with us early; a single-service repo
 (or a monorepo deployed as one unit) works today, independent sub-deploys do not.
 
+### Q: Can we change how the agents behave — teach them our rules and conventions?
+
+Yes — and this is a core strength. **The agents are LaunchDarkly AI Configs**, so
+"programming" an agent means editing its config, not changing product code. There
+are four customization surfaces:
+
+| Surface | What it controls | Where it lives |
+|---|---|---|
+| **Agent instructions** | Each agent's brief / system prompt — your rules, conventions, things to avoid | The AI Config's *Agent task* (LD UI) and `config/agentcontrol/ai-configs/*.json` |
+| **Tool definitions** | The descriptions + schemas the agents read to use tools (`create_flag`, `create_metric`, …) | `config/agentcontrol/tools/*.json`, provisioned into LD's tools library |
+| **The agent graph** | Chain order, routing conditions, and which capabilities each agent may use | `config/agentcontrol/graphs/*.json` |
+| **Operational flags** | Provider, approval mode/gates, risk threshold, knowledge graph | The `auto-factory-*` flags |
+
+You can edit these two ways:
+
+- **In the LaunchDarkly UI (live):** change an agent's instructions or a tool's
+  description directly. The pipeline reads them at run time — **no redeploy**.
+  Good for fast iteration and non-engineers.
+- **Config-as-code:** edit the JSON under `config/agentcontrol/` and sync with the
+  bridge (`bridge upgrade` pushes committed instructions/tools to the project
+  without touching your targeting). Good for review and reproducibility.
+
+Because they are AI Configs, you also get LaunchDarkly's native powers for free:
+**versioning** of every prompt change (with rollback), **targeting** (different
+instructions per environment), and **experimentation** — run two variations of an
+agent's prompt and let the attached **judges score which performs better**, so you
+tune agents with evidence rather than guesswork.
+
+### Q: When an agent gets something wrong, how do we improve it — and does that require a code change?
+
+No code change — you edit the agent's brief. A worked example from our own
+evaluation: the metrics-author agent chose a *trace* metric whose query didn't
+match the service's spans, so the guardrail received no data. The fix was **input,
+not code** — we added rules to the agent's instructions telling it to detect the
+observability SDK per language (not just JavaScript), verify the span name (or fall
+back to a `track()`-based metric), reuse an existing observability metric via
+`list_metrics`, and only ever gate a release on a metric that measures the harm and
+fires on both the control and treatment paths.
+
+That change is a single edit to
+`config/agentcontrol/ai-configs/autofactory-metrics-author.json`, synced to
+LaunchDarkly with the bridge — see commit
+[`2ffe61d`](https://github.com/launchdarkly-labs/launchdarkly-auto-factory/commit/2ffe61d4d5a7884e659271b2d0dcf7a8f926d080).
+The very next pull request runs with the improved brief. This is the intended
+improvement loop: **observe a miss on the monitoring panel → teach the agent as a
+config edit → the next run applies it → optionally A/B the old vs new prompt and let
+the judges confirm the gain.** Your domain rules, naming conventions, and
+"never do X" guardrails all live here.
+
 ---
 
 ## 4. Reliability & Operations
