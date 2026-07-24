@@ -131,6 +131,8 @@ app.MapPost("/api/checkout", async (HttpContext httpContext, CheckoutRequest req
 
     sw.Stop();
 
+    ld.Track("enable-fraud-screening-latency", context, null, sw.ElapsedMilliseconds);
+    ld.Track("enable-fraud-screening-checkout-complete", context);
     ld.Track("enable-checkout-recommendations-business", context);
     return Results.Ok(new
     {
