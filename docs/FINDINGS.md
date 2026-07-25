@@ -511,6 +511,49 @@ and *any* real regression on it reverts.
 
 ---
 
+## Finding 16 — Flag cleanup retires the flag but orphans its metrics *and* their instrumentation → metric sprawl
+
+Observed live on the Vega cleanup PR (#8, *"Retire enable-richer-recommendations flag
+(keep v2 behavior)"*). Vega correctly inlined the winning variation (v2) and removed the
+flag evaluation + the control/v1 branches — but its scope is **flag-only**. It left the
+metric side of the release completely behind:
+
+| What | Cleaned up? |
+|---|---|
+| Flag evaluation + non-winning branches | ✓ removed |
+| Winning variation inlined | ✓ |
+| Flag object retired | ✓ |
+| **`ld.Track("richer-rec-latency", …)` instrumentation** | ✗ **kept** (inlined verbatim) |
+| **Metric objects in LD** (`richer-rec-latency`, `richer-rec-error-rate`) | ✗ **left** (both still HTTP 200) |
+
+So each release leaves two kinds of debt:
+
+1. **Orphaned metric objects.** The metrics-author creates metrics per release (and is
+   non-deterministic — often *new* ones rather than reusing, see Finding 13). Cleanup
+   never archives them. **N releases → N orphaned metrics.**
+2. **Orphaned instrumentation.** Vega **kept the `Track` call** while inlining the winner,
+   so the app **keeps emitting the metric's events** to a metric no flag or release uses —
+   dead code that still costs event ingestion and clutters the metric list.
+
+That `Track` was **release-scoped instrumentation** (added by the metrics-author for the
+guarded release). Once the flag is retired it is pure garbage — it should have been removed
+*with* the flag, and the metric archived.
+
+Contrast: a **complete** retire (what we did manually for the earlier flags) removes all
+three layers — flag, the `Track` calls, **and** the metrics. Vega does only the flag layer.
+
+**Remediation — cleanup must extend to the metric layer:**
+- **Remove the flag-scoped `Track` calls** it inlines past (they exist only to feed the
+  release's guardrail metrics).
+- **Archive/delete the metrics once nothing else references them** — check attachments first
+  (no other guarded rollout, experiment, or metric group), the metric-side analogue of
+  LD's flag code-references. Never delete a shared/reused metric (e.g. `http-latency-checkout`).
+- This is the metric-side parallel to the flag-cleanup gap (Finding 10) and, like it, is
+  what a real Phase 3 must own — otherwise "100s of releases → 100s of orphaned metrics,"
+  each still ingesting events.
+
+---
+
 ## Can a runtime metric check even work if the metric is on the dark path?
 
 A fair objection: if a metric only fires on the new (dark) code, you can't verify
