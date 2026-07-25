@@ -320,6 +320,120 @@ public class CheckoutFlagTests
         Assert.DoesNotContain("price-match",    recs);
     }
 
+    // ---------------------------------------------------------------
+    // T-v2 — treatment path: v2 (7 recommendations)
+    // ---------------------------------------------------------------
+
+    /// <summary>
+    /// When the flag returns "v2", EnrichCheckout must return the 7-item extended
+    /// recommendations array (adds priority-support and carbon-offset over v1).
+    /// </summary>
+    [Fact]
+    public async Task EnrichCheckout_V2Variation_Returns7Recommendations()
+    {
+        using var factory = BuildFactory("v2");
+        using var client  = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/checkout",
+            new { userId = "u-v2-test", cartTotal = 129.99 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var recs = doc.RootElement.GetProperty("recommendations")
+                       .EnumerateArray().Select(e => e.GetString()).ToArray();
+
+        Assert.Equal(7, recs.Length);
+        Assert.Contains("extended-warranty",  recs);
+        Assert.Contains("gift-wrap",          recs);
+        Assert.Contains("express-shipping",   recs);
+        Assert.Contains("loyalty-points",     recs);
+        Assert.Contains("price-match",        recs);
+        Assert.Contains("priority-support",   recs);
+        Assert.Contains("carbon-offset",      recs);
+    }
+
+    /// <summary>
+    /// A valid v2 checkout response must include orderId, engine "v1", and
+    /// processingMs alongside the 7-item recommendations array.
+    /// </summary>
+    [Fact]
+    public async Task Checkout_V2Variation_ResponseSchemaIsComplete()
+    {
+        using var factory = BuildFactory("v2");
+        using var client  = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/checkout",
+            new { userId = "u-v2-schema", cartTotal = 75.00 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+
+        Assert.Equal(JsonValueKind.String, root.GetProperty("orderId").ValueKind);
+        Assert.Equal("v1",                 root.GetProperty("engine").GetString());
+        Assert.Equal(JsonValueKind.Number, root.GetProperty("processingMs").ValueKind);
+        Assert.Equal(JsonValueKind.Array,  root.GetProperty("recommendations").ValueKind);
+        Assert.Equal(7, root.GetProperty("recommendations").GetArrayLength());
+    }
+
+    /// <summary>
+    /// The v2 Stopwatch + Track path must not prevent a successful 200 response.
+    /// </summary>
+    [Fact]
+    public async Task EnrichCheckout_V2Variation_StopwatchTelemetry_DoesNotAffectResponse()
+    {
+        using var factory = BuildFactory("v2");
+        using var client  = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/checkout",
+            new { userId = "u-telemetry-v2", cartTotal = 55.00 });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var recs = doc.RootElement.GetProperty("recommendations")
+                       .EnumerateArray().Select(e => e.GetString()).ToArray();
+
+        Assert.Equal(7, recs.Length);
+        Assert.Contains("priority-support", recs);
+        Assert.Contains("carbon-offset",    recs);
+    }
+
+    /// <summary>
+    /// Three-way ordering invariant: v2 (7) > v1 (5) > control (3).
+    /// Guards against accidental merging or reordering of variation branches.
+    /// </summary>
+    [Fact]
+    public async Task EnrichCheckout_V2GreaterThanV1GreaterThanControl()
+    {
+        using var v2Factory      = BuildFactory("v2");
+        using var v1Factory      = BuildFactory("v1");
+        using var controlFactory = BuildFactory("control");
+        using var v2Client       = v2Factory.CreateClient();
+        using var v1Client       = v1Factory.CreateClient();
+        using var controlClient  = controlFactory.CreateClient();
+
+        var body = new { userId = "u-ordering", cartTotal = 20.00 };
+
+        var v2Response      = await v2Client.PostAsJsonAsync("/api/checkout", body);
+        var v1Response      = await v1Client.PostAsJsonAsync("/api/checkout", body);
+        var controlResponse = await controlClient.PostAsJsonAsync("/api/checkout", body);
+
+        using var v2Doc      = JsonDocument.Parse(await v2Response.Content.ReadAsStringAsync());
+        using var v1Doc      = JsonDocument.Parse(await v1Response.Content.ReadAsStringAsync());
+        using var controlDoc = JsonDocument.Parse(await controlResponse.Content.ReadAsStringAsync());
+
+        var v2Count      = v2Doc.RootElement.GetProperty("recommendations").GetArrayLength();
+        var v1Count      = v1Doc.RootElement.GetProperty("recommendations").GetArrayLength();
+        var controlCount = controlDoc.RootElement.GetProperty("recommendations").GetArrayLength();
+
+        Assert.True(v2Count > v1Count,
+            $"Expected v2 count ({v2Count}) > v1 count ({v1Count})");
+        Assert.True(v1Count > controlCount,
+            $"Expected v1 count ({v1Count}) > control count ({controlCount})");
+    }
+
     /// <summary>
     /// PR #6 renames the catch-block track event from
     /// "enable-richer-recommendations-error" to "richer-rec-error".
