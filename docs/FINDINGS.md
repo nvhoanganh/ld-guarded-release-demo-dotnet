@@ -464,6 +464,53 @@ knob to express *"I accept up to 2% slower."*
 
 ---
 
+## Finding 15 — Per-metric rollback intent is dropped: every metric gates, humans can't say "roll back on errors, monitor latency"
+
+A very common real-world need: **gate the release on error rate, but only *watch* latency**
+(don't auto-revert on it). Today that is impossible in this pipeline, even though every
+layer except two supports it.
+
+**What breaks it:**
+- The manifest's `releasePlan.metricKeys` is a **flat list** (e.g.
+  `["richer-rec-error-rate", "richer-rec-latency"]`) — no per-metric field for
+  "gate vs. monitor-only."
+- The human-editable `releaseIntent` block controls *whether/when* to release
+  (`action`/`notBefore`/`prerequisites`/…) — **nothing** about per-metric rollback.
+- **Beacon flattens all metrics to auto-rollback** (`trigger.ts`):
+  ```js
+  for (const m of metrics) metricMonitoringPreferences[m.key] = { autoRollback: true };
+  ```
+  So even a metric the agent tagged "monitoring" (observe-only) or "pause"
+  (hold-for-human) **auto-reverts** the release.
+
+**Yet the capability already exists at every other layer:**
+- **LaunchDarkly** accepts per-metric `autoRollback: true/false` (the
+  `metricMonitoringPreferences` field) — monitor-only metrics are supported.
+- **The metrics-author agent already classifies** each metric `killswitch` /
+  `pause` / `monitoring` — it *produces* the intent. It's discarded downstream.
+
+**Improvement (the fix):**
+1. **Extend the manifest** to carry per-metric intent, e.g.
+   ```json
+   "metrics": [
+     { "key": "richer-rec-error-rate", "autoRollback": true },   // gate
+     { "key": "richer-rec-latency",     "autoRollback": false }  // monitor only
+   ]
+   ```
+   (or `killswitchMetrics` / `monitorMetrics` lists).
+2. **Beacon honors it** — map the agent's role (`killswitch`→`autoRollback:true`,
+   `monitoring`→`autoRollback:false`, `pause`→a hold signal) instead of forcing `true`.
+3. **Surface it in `releaseIntent`** so the human approver can flip a metric between
+   gate and monitor-only at the approval gate — exactly "roll back on errors, watch
+   latency."
+
+The agent decides it, LaunchDarkly accepts it, the human wants it — only the manifest
+schema and Beacon's flattening stand in the way. Combined with Finding 14 (no
+effect-size tolerance), this is why guarded releases over-trigger: *every* metric gates,
+and *any* real regression on it reverts.
+
+---
+
 ## Can a runtime metric check even work if the metric is on the dark path?
 
 A fair objection: if a metric only fires on the new (dark) code, you can't verify
