@@ -617,6 +617,8 @@ shared-path metrics. The in-flight "zero samples = broken, not healthy" check
 | 12 | Cleanup conflates a *reverted* release with an *abandoned* feature; pushed an unverified build | Auto-clean only on a *completed* release; **hold on revert**; carry abandon-vs-retry intent explicitly; never push a cleanup that fails to build |
 | 13 | Agent improvement isn't sticky — metric quality is non-deterministic run-to-run | A **deterministic post-check** (every metricKey exists + receives data + unit matches; fail/hold otherwise); prefer a fixed policy for the guardrail metric, let the agent add diagnostics |
 | 14 **(headline)** | No practical-significance threshold — auto-rollback fires on *any* real regression (verified +17ms/3% at 171 samples) | A configurable **effect-size tolerance** (`>X% worse`) — not exposed by the API here, an ask for the LD product team; **workaround: SLO-shaped metric** (count requests over a threshold) so small in-SLO shifts don't register |
+| 15 | Per-metric rollback intent dropped — every metric gates, can't "roll back on errors, monitor latency" | Carry per-metric `autoRollback` in the manifest; **Beacon honors it** (stop flattening all to `true`); surface in `releaseIntent`. LD already accepts it per-metric |
+| 16 | Flag cleanup orphans metrics + their `Track` instrumentation → metric sprawl | Cleanup must also strip release-scoped `Track` calls and archive orphaned metrics (reference-gated). Vega is LD-managed/uncontrollable → owner is a factory companion agent, a Beacon post-merge hook, or the LD Vega team |
 
 **The one-line takeaway for a design partner:** the orchestration is real and it
 works — and the **improvement loop is real too** (we fixed an agent as config and
