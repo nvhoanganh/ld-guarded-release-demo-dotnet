@@ -14,10 +14,15 @@ using LdConfig = LaunchDarkly.Sdk.Server.Configuration;
 namespace GuardedReleaseDemo.Tests;
 
 /// <summary>
-/// Flag-path tests for the enable-richer-recommendations flag (v1 / control).
+/// Behavior tests for the checkout recommendations path (EnrichCheckout).
 ///
-/// Each test creates its own WebApplicationFactory backed by TestData so flag
-/// variations are fully deterministic without touching a real LaunchDarkly project.
+/// The enable-richer-recommendations flag has been retired: EnrichCheckout now
+/// unconditionally returns the 7-item extended recommendations set. These tests
+/// assert that static behavior.
+///
+/// Each test creates its own WebApplicationFactory backed by TestData so the
+/// remaining flag (new-checkout-flow) is deterministic without touching a real
+/// LaunchDarkly project.
 ///
 /// IMPORTANT — startup sequencing
 /// --------------------------------
@@ -45,10 +50,10 @@ public class CheckoutFlagTests
 
     /// <summary>
     /// Creates an in-process test server whose LD client is replaced by a
-    /// TestData-backed instance returning <paramref name="variation"/> for
-    /// "enable-richer-recommendations" and false for "new-checkout-flow".
+    /// TestData-backed instance. new-checkout-flow is kept off so requests reach
+    /// EnrichCheckout.
     /// </summary>
-    private static WebApplicationFactory<Program> BuildFactory(string variation)
+    private static WebApplicationFactory<Program> BuildFactory()
     {
         return new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
@@ -62,10 +67,6 @@ public class CheckoutFlagTests
                         services.Remove(descriptor);
 
                     var td = TestData.DataSource();
-
-                    // Flag under test: deterministic variation.
-                    td.Update(td.Flag("enable-richer-recommendations")
-                        .ValueForAll(LdValue.Of(variation)));
 
                     // Keep new-checkout-flow off so requests reach EnrichCheckout.
                     td.Update(td.Flag("new-checkout-flow")
@@ -83,259 +84,22 @@ public class CheckoutFlagTests
     }
 
     // ---------------------------------------------------------------
-    // T01 — treatment path: v1
+    // Recommendations behavior — now static (7-item extended set)
     // ---------------------------------------------------------------
 
     /// <summary>
-    /// When the flag returns "v1", EnrichCheckout must return the 5-item
-    /// extended recommendations array (loyalty-points, price-match included).
+    /// EnrichCheckout must return the 7-item extended recommendations array
+    /// (extended-warranty, gift-wrap, express-shipping, loyalty-points,
+    /// price-match, priority-support, carbon-offset).
     /// </summary>
     [Fact]
-    public async Task EnrichCheckout_V1Variation_Returns5Recommendations()
+    public async Task EnrichCheckout_Returns7Recommendations()
     {
-        using var factory = BuildFactory("v1");
+        using var factory = BuildFactory();
         using var client  = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-v1-test", cartTotal = 99.99 });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var recs = doc.RootElement.GetProperty("recommendations")
-                       .EnumerateArray().Select(e => e.GetString()).ToArray();
-
-        Assert.Equal(5, recs.Length);
-        Assert.Contains("loyalty-points", recs);
-        Assert.Contains("price-match", recs);
-        Assert.Contains("extended-warranty", recs);
-        Assert.Contains("gift-wrap", recs);
-        Assert.Contains("express-shipping", recs);
-    }
-
-    // ---------------------------------------------------------------
-    // T01 — control path
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// When the flag returns "control", EnrichCheckout must return the 3-item
-    /// baseline recommendations array (no loyalty-points or price-match).
-    /// </summary>
-    [Fact]
-    public async Task EnrichCheckout_ControlVariation_Returns3Recommendations()
-    {
-        using var factory = BuildFactory("control");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-ctrl-test", cartTotal = 49.99 });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var recs = doc.RootElement.GetProperty("recommendations")
-                       .EnumerateArray().Select(e => e.GetString()).ToArray();
-
-        Assert.Equal(3, recs.Length);
-        Assert.DoesNotContain("loyalty-points", recs);
-        Assert.DoesNotContain("price-match", recs);
-        Assert.Contains("extended-warranty", recs);
-        Assert.Contains("gift-wrap", recs);
-        Assert.Contains("express-shipping", recs);
-    }
-
-    // ---------------------------------------------------------------
-    // T12 — v1 and control are mutually exclusive (array size invariant)
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// The v1 path must return MORE recommendations than the control path;
-    /// this guards against accidental merging of variation branches.
-    /// </summary>
-    [Fact]
-    public async Task EnrichCheckout_V1ReturnsMoreItemsThanControl()
-    {
-        using var v1Factory      = BuildFactory("v1");
-        using var controlFactory = BuildFactory("control");
-        using var v1Client       = v1Factory.CreateClient();
-        using var controlClient  = controlFactory.CreateClient();
-
-        var body = new { userId = "u-cmp", cartTotal = 20.00 };
-
-        var v1Response =
-            await v1Client.PostAsJsonAsync("/api/checkout", body);
-        var controlResponse =
-            await controlClient.PostAsJsonAsync("/api/checkout", body);
-
-        using var v1Doc =
-            JsonDocument.Parse(await v1Response.Content.ReadAsStringAsync());
-        using var controlDoc =
-            JsonDocument.Parse(await controlResponse.Content.ReadAsStringAsync());
-
-        var v1Count =
-            v1Doc.RootElement.GetProperty("recommendations").GetArrayLength();
-        var controlCount =
-            controlDoc.RootElement.GetProperty("recommendations").GetArrayLength();
-
-        Assert.True(v1Count > controlCount,
-            $"Expected v1 recommendation count ({v1Count}) > control ({controlCount})");
-    }
-
-    // ---------------------------------------------------------------
-    // Guard tests (userId validation) — both variations share this path
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// A missing userId must return 400 before flag evaluation is reached.
-    /// </summary>
-    [Fact]
-    public async Task Checkout_MissingUserId_Returns400()
-    {
-        using var factory = BuildFactory("control");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "", cartTotal = 50.00 });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
-    /// <summary>
-    /// A null userId must return 400 before flag evaluation is reached.
-    /// </summary>
-    [Fact]
-    public async Task Checkout_NullUserId_Returns400()
-    {
-        using var factory = BuildFactory("v1");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = (string?)null, cartTotal = 50.00 });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
-    // ---------------------------------------------------------------
-    // Integration smoke tests — response schema
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// A valid v1 checkout response must include orderId, engine "v1", and
-    /// processingMs alongside the recommendations array.
-    /// </summary>
-    [Fact]
-    public async Task Checkout_V1Variation_ResponseSchemaIsComplete()
-    {
-        using var factory = BuildFactory("v1");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-schema", cartTotal = 75.00 });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var root = doc.RootElement;
-
-        Assert.Equal(JsonValueKind.String, root.GetProperty("orderId").ValueKind);
-        Assert.Equal("v1",                 root.GetProperty("engine").GetString());
-        Assert.Equal(JsonValueKind.Number, root.GetProperty("processingMs").ValueKind);
-        Assert.Equal(JsonValueKind.Array,  root.GetProperty("recommendations").ValueKind);
-    }
-
-    /// <summary>
-    /// A valid control checkout response must also include orderId, engine "v1",
-    /// and processingMs — verifying the control arm is not broken by the PR.
-    /// </summary>
-    [Fact]
-    public async Task Checkout_ControlVariation_ResponseSchemaIsComplete()
-    {
-        using var factory = BuildFactory("control");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-schema-ctrl", cartTotal = 75.00 });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var root = doc.RootElement;
-
-        Assert.Equal(JsonValueKind.String, root.GetProperty("orderId").ValueKind);
-        Assert.Equal("v1",                 root.GetProperty("engine").GetString());
-        Assert.Equal(JsonValueKind.Number, root.GetProperty("processingMs").ValueKind);
-        Assert.Equal(JsonValueKind.Array,  root.GetProperty("recommendations").ValueKind);
-    }
-
-    // ---------------------------------------------------------------
-    // PR #6 — micro-latency bump: Stopwatch + richer-rec-latency track
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// PR #6 adds a Stopwatch and ld.Track("richer-rec-latency", ...) inside the v1
-    /// branch.  The track call is guarded by try/catch so it must never prevent a
-    /// successful 200 response.  This test verifies the full v1 telemetry path:
-    /// Stopwatch starts, delay fires, Track is called, 5-item array is returned.
-    /// </summary>
-    [Fact]
-    public async Task EnrichCheckout_V1Variation_StopwatchTelemetry_DoesNotAffectResponse()
-    {
-        using var factory = BuildFactory("v1");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-telemetry-v1", cartTotal = 55.00 });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var recs = doc.RootElement.GetProperty("recommendations")
-                       .EnumerateArray().Select(e => e.GetString()).ToArray();
-
-        Assert.Equal(5, recs.Length);
-        Assert.Contains("loyalty-points", recs);
-        Assert.Contains("price-match",    recs);
-    }
-
-    /// <summary>
-    /// PR #6 also adds a Stopwatch and ld.Track("richer-rec-latency", ...) in the
-    /// control branch.  The track call is guarded, so control must still return a
-    /// clean 200 with the 3-item baseline array.
-    /// </summary>
-    [Fact]
-    public async Task EnrichCheckout_ControlVariation_StopwatchTelemetry_DoesNotAffectResponse()
-    {
-        using var factory = BuildFactory("control");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-telemetry-ctrl", cartTotal = 30.00 });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var recs = doc.RootElement.GetProperty("recommendations")
-                       .EnumerateArray().Select(e => e.GetString()).ToArray();
-
-        Assert.Equal(3, recs.Length);
-        Assert.DoesNotContain("loyalty-points", recs);
-        Assert.DoesNotContain("price-match",    recs);
-    }
-
-    // ---------------------------------------------------------------
-    // T-v2 — treatment path: v2 (7 recommendations)
-    // ---------------------------------------------------------------
-
-    /// <summary>
-    /// When the flag returns "v2", EnrichCheckout must return the 7-item extended
-    /// recommendations array (adds priority-support and carbon-offset over v1).
-    /// </summary>
-    [Fact]
-    public async Task EnrichCheckout_V2Variation_Returns7Recommendations()
-    {
-        using var factory = BuildFactory("v2");
-        using var client  = factory.CreateClient();
-
-        var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-v2-test", cartTotal = 129.99 });
+            new { userId = "u-recs-test", cartTotal = 129.99 });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -353,18 +117,56 @@ public class CheckoutFlagTests
         Assert.Contains("carbon-offset",      recs);
     }
 
+    // ---------------------------------------------------------------
+    // Guard tests (userId validation)
+    // ---------------------------------------------------------------
+
     /// <summary>
-    /// A valid v2 checkout response must include orderId, engine "v1", and
-    /// processingMs alongside the 7-item recommendations array.
+    /// A missing userId must return 400 before EnrichCheckout is reached.
     /// </summary>
     [Fact]
-    public async Task Checkout_V2Variation_ResponseSchemaIsComplete()
+    public async Task Checkout_MissingUserId_Returns400()
     {
-        using var factory = BuildFactory("v2");
+        using var factory = BuildFactory();
         using var client  = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-v2-schema", cartTotal = 75.00 });
+            new { userId = "", cartTotal = 50.00 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>
+    /// A null userId must return 400 before EnrichCheckout is reached.
+    /// </summary>
+    [Fact]
+    public async Task Checkout_NullUserId_Returns400()
+    {
+        using var factory = BuildFactory();
+        using var client  = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/checkout",
+            new { userId = (string?)null, cartTotal = 50.00 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    // ---------------------------------------------------------------
+    // Integration smoke test — response schema
+    // ---------------------------------------------------------------
+
+    /// <summary>
+    /// A valid checkout response must include orderId, engine "v1", and
+    /// processingMs alongside the 7-item recommendations array.
+    /// </summary>
+    [Fact]
+    public async Task Checkout_ResponseSchemaIsComplete()
+    {
+        using var factory = BuildFactory();
+        using var client  = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/checkout",
+            new { userId = "u-schema", cartTotal = 75.00 });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -377,17 +179,23 @@ public class CheckoutFlagTests
         Assert.Equal(7, root.GetProperty("recommendations").GetArrayLength());
     }
 
+    // ---------------------------------------------------------------
+    // Telemetry: Stopwatch + richer-rec-latency track
+    // ---------------------------------------------------------------
+
     /// <summary>
-    /// The v2 Stopwatch + Track path must not prevent a successful 200 response.
+    /// The Stopwatch + ld.Track("richer-rec-latency", ...) telemetry path is
+    /// guarded by try/catch, so it must never prevent a successful 200 response
+    /// with the 7-item array.
     /// </summary>
     [Fact]
-    public async Task EnrichCheckout_V2Variation_StopwatchTelemetry_DoesNotAffectResponse()
+    public async Task EnrichCheckout_StopwatchTelemetry_DoesNotAffectResponse()
     {
-        using var factory = BuildFactory("v2");
+        using var factory = BuildFactory();
         using var client  = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/checkout",
-            new { userId = "u-telemetry-v2", cartTotal = 55.00 });
+            new { userId = "u-telemetry", cartTotal = 55.00 });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -400,61 +208,20 @@ public class CheckoutFlagTests
         Assert.Contains("carbon-offset",    recs);
     }
 
-    /// <summary>
-    /// Three-way ordering invariant: v2 (7) > v1 (5) > control (3).
-    /// Guards against accidental merging or reordering of variation branches.
-    /// </summary>
-    [Fact]
-    public async Task EnrichCheckout_V2GreaterThanV1GreaterThanControl()
-    {
-        using var v2Factory      = BuildFactory("v2");
-        using var v1Factory      = BuildFactory("v1");
-        using var controlFactory = BuildFactory("control");
-        using var v2Client       = v2Factory.CreateClient();
-        using var v1Client       = v1Factory.CreateClient();
-        using var controlClient  = controlFactory.CreateClient();
-
-        var body = new { userId = "u-ordering", cartTotal = 20.00 };
-
-        var v2Response      = await v2Client.PostAsJsonAsync("/api/checkout", body);
-        var v1Response      = await v1Client.PostAsJsonAsync("/api/checkout", body);
-        var controlResponse = await controlClient.PostAsJsonAsync("/api/checkout", body);
-
-        using var v2Doc      = JsonDocument.Parse(await v2Response.Content.ReadAsStringAsync());
-        using var v1Doc      = JsonDocument.Parse(await v1Response.Content.ReadAsStringAsync());
-        using var controlDoc = JsonDocument.Parse(await controlResponse.Content.ReadAsStringAsync());
-
-        var v2Count      = v2Doc.RootElement.GetProperty("recommendations").GetArrayLength();
-        var v1Count      = v1Doc.RootElement.GetProperty("recommendations").GetArrayLength();
-        var controlCount = controlDoc.RootElement.GetProperty("recommendations").GetArrayLength();
-
-        Assert.True(v2Count > v1Count,
-            $"Expected v2 count ({v2Count}) > v1 count ({v1Count})");
-        Assert.True(v1Count > controlCount,
-            $"Expected v1 count ({v1Count}) > control count ({controlCount})");
-    }
+    // ---------------------------------------------------------------
+    // Error path: outer catch re-throws (tracks richer-rec-error)
+    // ---------------------------------------------------------------
 
     /// <summary>
-    /// PR #6 renames the catch-block track event from
-    /// "enable-richer-recommendations-error" to "richer-rec-error".
-    /// The outer catch in EnrichCheckout always re-throws, so any unhandled
-    /// exception inside the function must bubble up to the ASP.NET pipeline and
-    /// yield a non-success status.  This test confirms the re-throw is in place
-    /// under the control variation (verifying both variations share the same catch
-    /// path by using an unknown variation that falls through to the control arm).
-    /// The test is deterministic: we use the default "control" variation which
-    /// exercises the re-throw without requiring us to inject a fault.
-    /// NOTE: Because the Track call itself is also guarded (try { ld.Track(...) }
-    /// catch { }), any future failure in the LD SDK will never swallow the response
-    /// — the guarded-release catch block merely tracks and then re-throws the
-    /// original exception, preserving normal error propagation.
+    /// The outer catch in EnrichCheckout always re-throws, so a normal request
+    /// must yield a 200 (the error-track path is only reached on an actual
+    /// exception). The Track call itself is guarded, so it can never swallow the
+    /// response.
     /// </summary>
     [Fact]
-    public async Task EnrichCheckout_BothVariations_ErrorCatchDoesNotSwallowResponse()
+    public async Task EnrichCheckout_ErrorCatchDoesNotSwallowResponse()
     {
-        // Use v1 factory — verify the v1 path also has a healthy success response,
-        // confirming the outer try/catch re-throw path is not incorrectly triggered.
-        using var factory = BuildFactory("v1");
+        using var factory = BuildFactory();
         using var client  = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/checkout",
