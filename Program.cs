@@ -144,7 +144,8 @@ static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context c
             await Task.Delay(Random.Shared.Next(220, 322));
             sw.Stop();
             try { ld.Track("richer-rec-latency", context, LdValue.Null, sw.ElapsedMilliseconds); } catch { }
-            return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
+            // Expanded again: add priority-support and carbon-offset to the recommendations.
+            return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match", "priority-support", "carbon-offset" };
         }
         // control: preserve existing behavior
         var swCtl = Stopwatch.StartNew();
