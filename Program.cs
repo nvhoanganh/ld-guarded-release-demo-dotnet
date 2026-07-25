@@ -137,19 +137,25 @@ static async Task<string[]> EnrichCheckout(string userId, LdClient ld, Context c
         var variation = ld.StringVariation("enable-richer-recommendations", context, "control");
         if (variation == "v1")
         {
-            // Intentionally ~10ms higher median than control (230–330ms vs 220–320ms) with
-            // a tighter range. The overlap is deliberate: this is the demo trigger for
-            // guarded-rollback testing — a small regression that automated analysis detects.
-            await Task.Delay(Random.Shared.Next(230, 330));
+            // Micro-regression: v1 is essentially identical to control (220–322 vs
+            // 220–320) — only ~+1ms on average. Tests how small a real regression the
+            // guarded rollback will still detect at scale.
+            var sw = Stopwatch.StartNew();
+            await Task.Delay(Random.Shared.Next(220, 322));
+            sw.Stop();
+            try { ld.Track("richer-rec-latency", context, LdValue.Null, sw.ElapsedMilliseconds); } catch { }
             return new[] { "extended-warranty", "gift-wrap", "express-shipping", "loyalty-points", "price-match" };
         }
         // control: preserve existing behavior
+        var swCtl = Stopwatch.StartNew();
         await Task.Delay(Random.Shared.Next(220, 320));
+        swCtl.Stop();
+        try { ld.Track("richer-rec-latency", context, LdValue.Null, swCtl.ElapsedMilliseconds); } catch { }
         return new[] { "extended-warranty", "gift-wrap", "express-shipping" };
     }
     catch
     {
-        try { ld.Track("enable-richer-recommendations-error", context); } catch { }
+        try { ld.Track("richer-rec-error", context); } catch { }
         throw;
     }
 }
