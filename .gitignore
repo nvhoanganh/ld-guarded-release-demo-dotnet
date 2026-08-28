@@ -47,3 +47,4 @@ appsettings.Development.json
 *.env
 .env.*
 secrets.json
+.env
