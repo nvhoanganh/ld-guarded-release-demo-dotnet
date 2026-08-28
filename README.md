@@ -18,7 +18,20 @@ event tracking required on the app side.
 
 ## 1. Configure LaunchDarkly
 
-In your LaunchDarkly project, set up the following manually:
+The flag and the latency metric are managed as code with Terraform in
+[`devops/terraform`](devops/terraform/README.md) (LaunchDarkly provider v3):
+
+```bash
+export LD_API_KEY=api-...        # personal API access token, NOT the SDK key
+cd devops/terraform && bash apply.sh
+```
+
+That creates `new-checkout-flow` (off, serving `false`) and the
+`http-latency-checkout` metric. The **Guarded rollout** itself is not
+manageable by the provider — configure it in the UI as described below.
+
+If you prefer to click through it, or want to see what Terraform is creating,
+here is the same setup done manually:
 
 ### Feature flag
 
@@ -142,6 +155,7 @@ While k6 runs:
 ├── Program.cs                  # Minimal API: ObservabilityPlugin setup + POST /api/checkout
 ├── appsettings.example.json    # Template — copy to appsettings.json and add your SDK key
 ├── appsettings.json            # Local config (git-ignored; holds your real SDK key)
+├── devops/terraform/          # LaunchDarkly flag + metric as code (provider v3)
 ├── k6/
 │   └── load-test.js            # k6 script: ramp + sustain + per-engine metrics split
 └── README.md
