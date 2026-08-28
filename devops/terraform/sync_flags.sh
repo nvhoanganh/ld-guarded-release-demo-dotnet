@@ -23,10 +23,13 @@ ENV_FILE="$SCRIPT_DIR/../../.env"
 
 if [[ -f "$ENV_FILE" ]]; then
   echo "Loading credentials from $ENV_FILE"
+  # Only the keys this script needs are read out of .env — a stray or
+  # tampered line cannot overwrite PATH or any other variable.
   while IFS='=' read -r key value; do
-    # Skip blank lines, comments, and lines without =
     [[ -z "$key" || "$key" == \#* || -z "$value" ]] && continue
-    export "$key=$value"
+    case "$key" in
+      LD_API_KEY|LD_PROJECT_KEY|LD_ENVIRONMENT_KEY) export "$key=$value" ;;
+    esac
   done < "$ENV_FILE"
 else
   echo "Warning: .env not found at $ENV_FILE — falling back to environment variables"
@@ -67,9 +70,11 @@ fetch_all_flags() {
   echo "Fetching flags from LaunchDarkly (project: $LD_PROJECT_KEY)..." >&2
 
   while true; do
-    response=$(curl -s \
-      -H "Authorization: $LD_API_KEY" \
-      "$API_BASE/flags/$LD_PROJECT_KEY?limit=$limit&offset=$offset")
+    # Token is fed to curl on stdin as a config file rather than as an
+    # argument, so it never shows up in `ps` output.
+    response=$(printf 'header = "Authorization: %s"\n' "$LD_API_KEY" \
+      | curl -s -K - \
+        "$API_BASE/flags/$LD_PROJECT_KEY?limit=$limit&offset=$offset")
 
     if echo "$response" | jq -e '.code' &>/dev/null; then
       echo "Error: LD API returned: $(echo "$response" | jq -r '.message // .code')" >&2
@@ -138,14 +143,17 @@ rm -f "$TMP_KEYS"
 echo "Written: $IMPORTS_FILE ($FLAG_COUNT import blocks)"
 
 # ---------------------------------------------------------------------------
-# Write terraform.tfvars so terraform commands don't prompt for variables
+# Set variables for the terraform commands below. The API token is passed via
+# TF_VAR_ so it is never written to disk or exposed in `ps` output; only the
+# non-secret keys go into terraform.tfvars.
 # ---------------------------------------------------------------------------
+export TF_VAR_ld_api_key="$LD_API_KEY"
+
 cat > terraform.tfvars <<EOF
-ld_api_key         = "$LD_API_KEY"
 ld_project_key     = "$LD_PROJECT_KEY"
 ld_environment_key = "$LD_ENVIRONMENT_KEY"
 EOF
-echo "Written: terraform.tfvars"
+echo "Written: terraform.tfvars (no secrets; token passed via TF_VAR_ld_api_key)"
 
 # ---------------------------------------------------------------------------
 # Run terraform init if .terraform directory doesn't exist
